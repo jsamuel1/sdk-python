@@ -1,12 +1,18 @@
 import concurrent
 import functools
 import unittest.mock
+import uuid
 
 import pytest
 
 import strands
 import strands.telemetry
 from strands.types.content import Message
+
+
+@pytest.fixture(autouse=True)
+def moto_autouse(moto_env):
+    _ = moto_env
 
 
 @pytest.fixture
