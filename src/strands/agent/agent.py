@@ -40,6 +40,7 @@ from .conversation_manager import (
     ConversationManager,
     SlidingWindowConversationManager,
 )
+from .tool_manager import ToolManager, StaticToolManager
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ class Agent:
         system_prompt: Optional[str] = None,
         callback_handler: Optional[Callable] = PrintingCallbackHandler(),
         conversation_manager: Optional[ConversationManager] = None,
+        tool_manager: Optional[ToolManager] = None,
         max_parallel_tools: int = os.cpu_count() or 1,
         record_direct_tool_call: bool = True,
         load_tools_from_directory: bool = True,
@@ -225,6 +227,13 @@ class Agent:
         self.callback_handler = callback_handler or null_callback_handler
 
         self.conversation_manager = conversation_manager if conversation_manager else SlidingWindowConversationManager()
+
+        # Initialize tool manager
+        self.tool_manager = tool_manager or StaticToolManager()
+        
+        # Set agent reference for retrieval managers
+        if hasattr(self.tool_manager, 'set_agent'):
+            self.tool_manager.set_agent(self)
 
         # Process trace attributes to ensure they're of compatible types
         self.trace_attributes: Dict[str, AttributeValue] = {}
@@ -300,6 +309,37 @@ class Agent:
             The complete tool configuration.
         """
         return self.tool_registry.initialize_tool_config()
+    
+    def _select_tools_for_context(
+        self, 
+        prompt: str, 
+        messages: List[Dict[str, Any]]
+    ) -> ToolConfig:
+        """Select tools based on context using tool manager."""
+        if isinstance(self.tool_manager, StaticToolManager):
+            return self.tool_config
+        
+        available_tools = self.tool_registry.get_all_tools_config()
+        
+        # Call the tool manager (now always sync)
+        selected_config = self.tool_manager.select_tools(
+            prompt=prompt,
+            available_tools=available_tools,
+            context_messages=messages[-5:],
+            agent_context={"system_prompt": self.system_prompt},
+        )
+        
+        return self._convert_to_tool_config(selected_config)
+    
+    def _convert_to_tool_config(self, selected_config: Dict[str, Any]) -> ToolConfig:
+        """Convert tool manager result to proper ToolConfig format."""
+        from ..types.tools import Tool
+        tools: List[Tool] = [{"toolSpec": spec} for spec in selected_config["tools"]]
+        
+        return {
+            "tools": tools,
+            "toolChoice": selected_config["toolChoice"],
+        }
 
     def __del__(self) -> None:
         """Clean up resources when Agent is garbage collected.
@@ -460,6 +500,20 @@ class Agent:
         tool_handler = kwargs.pop("tool_handler", self.tool_handler)
         messages = kwargs.pop("messages", self.messages)
         tool_config = kwargs.pop("tool_config", self.tool_config)
+        
+        # Dynamic tool selection for non-static managers
+        if not isinstance(self.tool_manager, StaticToolManager):
+            # Extract current prompt from messages
+            current_prompt = ""
+            if messages and messages[-1].get("role") == "user":
+                for block in messages[-1].get("content", []):
+                    if text := block.get("text"):
+                        current_prompt = text
+                        break
+            
+            # Get dynamic tool config (now simple and sync!)
+            tool_config = self._select_tools_for_context(current_prompt, messages)
+        
         kwargs.pop("agent", None)  # Remove agent to avoid conflicts
 
         try:

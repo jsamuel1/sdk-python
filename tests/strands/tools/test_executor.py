@@ -52,10 +52,10 @@ def invalid_tool_use_ids(request):
     return request.param if hasattr(request, "param") else []
 
 
-@unittest.mock.patch.object(strands.telemetry.metrics, "uuid4", return_value="trace1")
 @pytest.fixture
 def cycle_trace():
-    return strands.telemetry.metrics.Trace(name="test trace", raw_name="raw_name")
+    with unittest.mock.patch("uuid.uuid4", return_value="trace1"):
+        return strands.telemetry.metrics.Trace(name="test trace", raw_name="raw_name")
 
 
 @pytest.fixture
@@ -546,3 +546,49 @@ def test_run_tools_parallel_execution_with_spans(
 
     # Verify spans were ended for both tools
     assert mock_tracer.end_tool_call_span.call_count == 2
+
+
+@unittest.mock.patch("strands.tools.executor.get_tracer")
+def test_run_tools_exception_with_no_tracing_span(
+    mock_get_tracer,
+    tool_uses,
+    event_loop_metrics,
+    request_state,
+    invalid_tool_use_ids,
+    cycle_trace,
+):
+    """Test exception handling when tool_call_span is None (tracing disabled)."""
+    # Create a mock handler that throws an exception
+    mock_handler = unittest.mock.MagicMock(side_effect=ValueError("Test exception"))
+    
+    # Mock the tracer to return None for tool_call_span (simulating disabled tracing)
+    mock_tracer = unittest.mock.MagicMock()
+    mock_tracer.start_tool_call_span.return_value = None  # This is the key - span is None
+    mock_get_tracer.return_value = mock_tracer
+    
+    tool_results = []
+    
+    # Run the tool execution - should handle the exception gracefully
+    failed = strands.tools.executor.run_tools(
+        mock_handler,
+        tool_uses,
+        event_loop_metrics,
+        request_state,
+        invalid_tool_use_ids,
+        tool_results,
+        cycle_trace,
+        None,  # parent_span
+        None,  # parallel_tool_executor (sequential execution)
+    )
+    
+    # Verify the execution failed due to exception
+    assert failed
+    
+    # Verify tracer methods were called appropriately
+    mock_tracer.start_tool_call_span.assert_called_once()
+    
+    # Verify that end_span_with_error was NOT called since tool_call_span was None
+    mock_tracer.end_span_with_error.assert_not_called()
+    
+    # Verify that end_tool_call_span was NOT called since tool_call_span was None
+    mock_tracer.end_tool_call_span.assert_not_called()
