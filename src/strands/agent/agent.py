@@ -40,6 +40,7 @@ from .conversation_manager import (
 )
 from .tool_manager import ToolManager, StaticToolManager
 from .state import AgentState
+from .tool_manager import ToolManager, StaticToolManager
 
 logger = logging.getLogger(__name__)
 
