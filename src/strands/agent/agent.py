@@ -600,7 +600,7 @@ class Agent:
 
         try:
             # Execute the main event loop cycle
-            stop_reason, message, metrics, state = event_loop_cycle(
+            events = event_loop_cycle(
                 model=model,
                 system_prompt=system_prompt,
                 messages=messages,  # will be modified by event_loop_cycle
@@ -613,6 +613,11 @@ class Agent:
                 event_loop_parent_span=self.trace_span,
                 **kwargs,
             )
+            for event in events:
+                if "callback" in event:
+                    callback_handler(**event["callback"])
+
+            stop_reason, message, metrics, state = event["stop"]
 
             return AgentResult(stop_reason, message, metrics, state)
 
