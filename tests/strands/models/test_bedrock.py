@@ -3,6 +3,7 @@ import sys
 import unittest.mock
 
 import boto3
+import pydantic
 import pytest
 from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import ClientError, EventStreamError
@@ -82,6 +83,15 @@ def tool_spec():
 @pytest.fixture
 def cache_type():
     return "default"
+
+
+@pytest.fixture
+def test_output_model_cls():
+    class TestOutputModel(pydantic.BaseModel):
+        name: str
+        age: int
+
+    return TestOutputModel
 
 
 def test__init__default_model_id(bedrock_client):
@@ -1033,6 +1043,26 @@ def test_converse_output_guardrails_redacts_output(bedrock_client):
 
     bedrock_client.converse.assert_called_once()
     bedrock_client.converse_stream.assert_not_called()
+
+
+def test_structured_output(bedrock_client, model, test_output_model_cls):
+    messages = [{"role": "user", "content": [{"text": "Generate a person"}]}]
+
+    bedrock_client.converse_stream.return_value = {
+        "stream": [
+            {"messageStart": {"role": "assistant"}},
+            {"contentBlockStart": {"start": {"toolUse": {"toolUseId": "123", "name": "TestOutputModel"}}}},
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": '{"name": "John", "age": 30}'}}}},
+            {"contentBlockStop": {}},
+            {"messageStop": {"stopReason": "tool_use"}},
+        ]
+    }
+
+    stream = model.structured_output(test_output_model_cls, messages)
+
+    tru_output = list(stream)[-1]
+    exp_output = {"output": test_output_model_cls(name="John", age=30)}
+    assert tru_output == exp_output
 
 
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="This test requires Python 3.11 or higher (need add_note)")
