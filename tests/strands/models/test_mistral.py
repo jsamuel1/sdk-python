@@ -1,5 +1,6 @@
 import unittest.mock
 
+import pydantic
 import pytest
 
 import strands
@@ -56,6 +57,15 @@ def tool_use_messages():
 @pytest.fixture
 def system_prompt():
     return "You are a helpful assistant"
+
+
+@pytest.fixture
+def test_output_model_cls():
+    class TestOutputModel(pydantic.BaseModel):
+        name: str
+        age: int
+
+    return TestOutputModel
 
 
 def test__init__model_configs(mistral_client, model_id, max_tokens):
@@ -440,14 +450,9 @@ def test_stream_other_error(mistral_client, model):
         list(model.stream({}))
 
 
-def test_structured_output_success(mistral_client, model):
-    from pydantic import BaseModel
+def test_structured_output_success(mistral_client, model, test_output_model_cls):
+    messages = [{"role": "user", "content": [{"text": "Extract data"}]}]
 
-    class TestModel(BaseModel):
-        name: str
-        age: int
-
-    # Mock successful response
     mock_response = unittest.mock.Mock()
     mock_response.choices = [unittest.mock.Mock()]
     mock_response.choices[0].message.tool_calls = [unittest.mock.Mock()]
@@ -455,20 +460,14 @@ def test_structured_output_success(mistral_client, model):
 
     mistral_client.chat.complete.return_value = mock_response
 
-    prompt = [{"role": "user", "content": [{"text": "Extract data"}]}]
-    result = model.structured_output(TestModel, prompt)
+    stream = model.structured_output(test_output_model_cls, messages)
 
-    assert isinstance(result, TestModel)
-    assert result.name == "John"
-    assert result.age == 30
+    tru_result = list(stream)[-1]
+    exp_result = {"output": test_output_model_cls(name="John", age=30)}
+    assert tru_result == exp_result
 
 
-def test_structured_output_no_tool_calls(mistral_client, model):
-    from pydantic import BaseModel
-
-    class TestModel(BaseModel):
-        name: str
-
+def test_structured_output_no_tool_calls(mistral_client, model, test_output_model_cls):
     mock_response = unittest.mock.Mock()
     mock_response.choices = [unittest.mock.Mock()]
     mock_response.choices[0].message.tool_calls = None
@@ -478,15 +477,11 @@ def test_structured_output_no_tool_calls(mistral_client, model):
     prompt = [{"role": "user", "content": [{"text": "Extract data"}]}]
 
     with pytest.raises(ValueError, match="No tool calls found in response"):
-        model.structured_output(TestModel, prompt)
+        stream = model.structured_output(test_output_model_cls, prompt)
+        next(stream)
 
 
-def test_structured_output_invalid_json(mistral_client, model):
-    from pydantic import BaseModel
-
-    class TestModel(BaseModel):
-        name: str
-
+def test_structured_output_invalid_json(mistral_client, model, test_output_model_cls):
     mock_response = unittest.mock.Mock()
     mock_response.choices = [unittest.mock.Mock()]
     mock_response.choices[0].message.tool_calls = [unittest.mock.Mock()]
@@ -497,4 +492,5 @@ def test_structured_output_invalid_json(mistral_client, model):
     prompt = [{"role": "user", "content": [{"text": "Extract data"}]}]
 
     with pytest.raises(ValueError, match="Failed to parse tool call arguments into model"):
-        model.structured_output(TestModel, prompt)
+        stream = model.structured_output(test_output_model_cls, prompt)
+        next(stream)

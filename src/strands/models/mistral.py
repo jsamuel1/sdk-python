@@ -6,7 +6,7 @@
 import base64
 import json
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Type, TypeVar, Union
 
 from mistralai import Mistral
 from pydantic import BaseModel
@@ -472,7 +472,7 @@ class MistralModel(Model):
     @override
     def structured_output(
         self, output_model: Type[T], prompt: Messages, callback_handler: Optional[Callable] = None
-    ) -> T:
+    ) -> Generator[dict[str, Union[T, Any]], None, None]:
         """Get structured output from the model.
 
         Args:
@@ -507,7 +507,8 @@ class MistralModel(Model):
                     arguments = json.loads(tool_call.function.arguments)
                 else:
                     arguments = tool_call.function.arguments
-                return output_model(**arguments)
+                yield {"output": output_model(**arguments)}
+                return
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 raise ValueError(f"Failed to parse tool call arguments into model: {e}") from e
 
