@@ -21,23 +21,9 @@ def tool_use_identity(tool_registry):
     def identity(a: int) -> int:
         return a
 
-    identity_tool = strands.tools.tools.FunctionTool(identity)
-    tool_registry.register_tool(identity_tool)
+    tool_registry.register_tool(identity)
 
     return {"toolUseId": "identity", "name": "identity", "input": {"a": 1}}
-
-
-@pytest.fixture
-def tool_use_error(tool_registry):
-    def error():
-        return
-
-    error.TOOL_SPEC = {"invalid": True}
-
-    error_tool = strands.tools.tools.FunctionTool(error)
-    tool_registry.register_tool(error_tool)
-
-    return {"toolUseId": "error", "name": "error", "input": {}}
 
 
 def test_process(tool_handler, tool_use_identity):

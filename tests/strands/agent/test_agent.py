@@ -122,10 +122,8 @@ def tool_imported(tmp_path, monkeypatch):
 
 @pytest.fixture
 def tool(tool_decorated, tool_registry):
-    function_tool = strands.tools.tools.FunctionTool(tool_decorated, tool_name="tool_decorated")
-    tool_registry.register_tool(function_tool)
-
-    return function_tool
+    tool_registry.register_tool(tool_decorated)
+    return tool_decorated
 
 
 @pytest.fixture
@@ -156,8 +154,7 @@ def agent(
     # Only register the tool directly if tools wasn't parameterized
     if not hasattr(request, "param") or request.param is None:
         # Create a new function tool directly from the decorated function
-        function_tool = strands.tools.tools.FunctionTool(tool_decorated, tool_name="tool_decorated")
-        agent.tool_registry.register_tool(function_tool)
+        agent.tool_registry.register_tool(tool_decorated)
 
     return agent
 
@@ -809,8 +806,7 @@ def test_agent_tool_with_name_normalization(agent, tool_registry, mock_randint):
     def function(system_prompt: str) -> str:
         return system_prompt
 
-    tool = strands.tools.tools.FunctionTool(function)
-    agent.tool_registry.register_tool(tool)
+    agent.tool_registry.register_tool(function)
 
     mock_randint.return_value = 1
 
