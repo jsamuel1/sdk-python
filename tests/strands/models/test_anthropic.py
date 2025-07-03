@@ -624,7 +624,8 @@ def test_format_chunk_unknown(model):
         model.format_chunk(event)
 
 
-def test_stream(anthropic_client, model):
+@pytest.mark.asyncio
+async def test_stream(anthropic_client, model, alist):
     mock_event_1 = unittest.mock.Mock(
         type="message_start",
         dict=lambda: {"type": "message_start"},
@@ -652,7 +653,7 @@ def test_stream(anthropic_client, model):
     request = {"model": "m1"}
     response = model.stream(request)
 
-    tru_events = list(response)
+    tru_events = await alist(response)
     exp_events = [
         {"type": "message_start"},
         {
@@ -665,13 +666,14 @@ def test_stream(anthropic_client, model):
     anthropic_client.messages.stream.assert_called_once_with(**request)
 
 
-def test_stream_rate_limit_error(anthropic_client, model):
+@pytest.mark.asyncio
+async def test_stream_rate_limit_error(anthropic_client, model, alist):
     anthropic_client.messages.stream.side_effect = anthropic.RateLimitError(
         "rate limit", response=unittest.mock.Mock(), body=None
     )
 
     with pytest.raises(ModelThrottledException, match="rate limit"):
-        next(model.stream({}))
+        await alist(model.stream({}))
 
 
 @pytest.mark.parametrize(
@@ -682,25 +684,28 @@ def test_stream_rate_limit_error(anthropic_client, model):
         "...input and output tokens exceed your context limit...",
     ],
 )
-def test_stream_bad_request_overflow_error(overflow_message, anthropic_client, model):
+@pytest.mark.asyncio
+async def test_stream_bad_request_overflow_error(overflow_message, anthropic_client, model):
     anthropic_client.messages.stream.side_effect = anthropic.BadRequestError(
         overflow_message, response=unittest.mock.Mock(), body=None
     )
 
     with pytest.raises(ContextWindowOverflowException):
-        next(model.stream({}))
+        await anext(model.stream({}))
 
 
-def test_stream_bad_request_error(anthropic_client, model):
+@pytest.mark.asyncio
+async def test_stream_bad_request_error(anthropic_client, model):
     anthropic_client.messages.stream.side_effect = anthropic.BadRequestError(
         "bad", response=unittest.mock.Mock(), body=None
     )
 
     with pytest.raises(anthropic.BadRequestError, match="bad"):
-        next(model.stream({}))
+        await anext(model.stream({}))
 
 
-def test_structured_output(anthropic_client, model, test_output_model_cls):
+@pytest.mark.asyncio
+async def test_structured_output(anthropic_client, model, test_output_model_cls, alist):
     messages = [{"role": "user", "content": [{"text": "Generate a person"}]}]
 
     events = [
@@ -749,7 +754,8 @@ def test_structured_output(anthropic_client, model, test_output_model_cls):
     anthropic_client.messages.stream.return_value.__enter__.return_value = mock_stream
 
     stream = model.structured_output(test_output_model_cls, messages)
+    events = await alist(stream)
 
-    tru_result = list(stream)[-1]
+    tru_result = events[-1]
     exp_result = {"output": test_output_model_cls(name="John", age=30)}
     assert tru_result == exp_result
