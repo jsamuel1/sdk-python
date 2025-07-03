@@ -56,6 +56,7 @@ class _DefaultCallbackHandlerSentinel:
 
 
 _DEFAULT_CALLBACK_HANDLER = _DefaultCallbackHandlerSentinel()
+_DEFAULT_AGENT_NAME = "Strands Agents"
 
 
 class Agent:
@@ -320,7 +321,7 @@ class Agent:
             self.state = AgentState()
 
         self.tool_caller = Agent.ToolCaller(self)
-        self.name = name
+        self.name = name or _DEFAULT_AGENT_NAME
         self.description = description
 
         self._hooks = HookRegistry()
@@ -710,6 +711,7 @@ class Agent:
 
         self.trace_span = self.tracer.start_agent_span(
             prompt=prompt,
+            agent_name=self.name,
             model_id=model_id,
             tools=self.tool_names,
             system_prompt=self.system_prompt,
