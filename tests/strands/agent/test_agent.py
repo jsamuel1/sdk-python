@@ -852,13 +852,13 @@ def test_agent_tool_no_parameter_conflict(agent, tool_registry, mock_randint, mo
     agent.tool.system_prompter(system_prompt="tool prompt")
 
     mock_run_tool.assert_called_with(
-        agent=agent,
-        tool={
+        agent,
+        {
             "toolUseId": "tooluse_system_prompter_1",
             "name": "system_prompter",
             "input": {"system_prompt": "tool prompt"},
         },
-        kwargs={"system_prompt": "tool prompt"},
+        {"system_prompt": "tool prompt"},
     )
 
 
@@ -879,15 +879,15 @@ def test_agent_tool_with_name_normalization(agent, tool_registry, mock_randint, 
 
     # Verify the correct tool was invoked
     assert mock_run_tool.call_count == 1
-    tool_call = mock_run_tool.call_args.kwargs.get("tool")
-
-    assert tool_call == {
+    tru_tool_use = mock_run_tool.call_args.args[1]
+    exp_tool_use = {
         # Note that the tool-use uses the "python safe" name
         "toolUseId": "tooluse_system_prompter_1",
         # But the name of the tool is the one in the registry
         "name": tool_name,
         "input": {"system_prompt": "tool prompt"},
     }
+    assert tru_tool_use == exp_tool_use
 
 
 def test_agent_tool_with_no_normalized_match(agent, tool_registry, mock_randint):

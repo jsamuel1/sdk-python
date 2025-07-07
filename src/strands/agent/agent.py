@@ -130,7 +130,7 @@ class Agent:
                 }
 
                 # Execute the tool
-                events = run_tool(agent=self._agent, tool=tool_use, kwargs=kwargs)
+                events = run_tool(self._agent, tool_use, kwargs)
 
                 try:
                     while True:

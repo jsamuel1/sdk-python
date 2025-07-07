@@ -56,7 +56,7 @@ async def event_loop_cycle(agent: "Agent", kwargs: dict[str, Any]) -> AsyncGener
             - event_loop_cycle_span: Current tracing Span for this cycle
 
     Yields:
-        Model and tool invocation events. The last event is a tuple containing:
+        Model and tool stream events. The last event is a tuple containing:
 
             - StopReason: Reason the model stopped generating (e.g., "tool_use")
             - Message: The generated message from the model
@@ -254,14 +254,14 @@ async def recurse_event_loop(agent: "Agent", kwargs: dict[str, Any]) -> AsyncGen
     recursive_trace.end()
 
 
-def run_tool(agent: "Agent", kwargs: dict[str, Any], tool: ToolUse) -> ToolGenerator:
+def run_tool(agent: "Agent", tool_use: ToolUse, kwargs: dict[str, Any]) -> ToolGenerator:
     """Process a tool invocation.
 
-    Looks up the tool in the registry and invokes it with the provided parameters.
+    Looks up the tool in the registry and streams it with the provided parameters.
 
     Args:
         agent: The agent for which the tool is being executed.
-        tool: The tool object to process, containing name and parameters.
+        tool_use: The tool object to process, containing name and parameters.
         kwargs: Additional keyword arguments passed to the tool.
 
     Yields:
@@ -270,9 +270,9 @@ def run_tool(agent: "Agent", kwargs: dict[str, Any], tool: ToolUse) -> ToolGener
     Returns:
         The final tool result or an error response if the tool fails or is not found.
     """
-    logger.debug("tool=<%s> | invoking", tool)
-    tool_use_id = tool["toolUseId"]
-    tool_name = tool["name"]
+    logger.debug("tool_use=<%s> | streaming", tool_use)
+    tool_use_id = tool_use["toolUseId"]
+    tool_name = tool_use["name"]
 
     # Get the tool info
     tool_info = agent.tool_registry.dynamic_tools.get(tool_name)
@@ -301,8 +301,7 @@ def run_tool(agent: "Agent", kwargs: dict[str, Any], tool: ToolUse) -> ToolGener
             }
         )
 
-        result = tool_func.invoke(tool, **kwargs)
-        yield {"result": result}  # Placeholder until tool_func becomes a generator from which we can yield from
+        result = yield from tool_func.stream(tool_use, **kwargs)
         return result
 
     except Exception as e:
@@ -341,8 +340,8 @@ async def _handle_tool_execution(
         kwargs: Additional keyword arguments, including request state.
 
     Yields:
-        Tool invocation events along with events yielded from a recursive call to the event loop. The last event is a
-        tuple containing:
+        Tool stream events along with events yielded from a recursive call to the event loop. The last event is a tuple
+        containing:
             - The stop reason,
             - The updated message,
             - The updated event loop metrics,
@@ -355,7 +354,7 @@ async def _handle_tool_execution(
         return
 
     def tool_handler(tool_use: ToolUse) -> ToolGenerator:
-        return run_tool(agent=agent, kwargs=kwargs, tool=tool_use)
+        return run_tool(agent, tool_use, kwargs)
 
     tool_events = run_tools(
         handler=tool_handler,

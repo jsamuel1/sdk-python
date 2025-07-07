@@ -50,8 +50,9 @@ def thread_pool():
 
 @pytest.fixture
 def tool(tool_registry):
-    @strands.tools.tool
-    def tool_for_testing(random_string: str) -> str:
+    @strands.tool
+    def tool_for_testing(random_string: str):
+        yield {"event": "abc"}
         return random_string
 
     tool_registry.register_tool(tool_for_testing)
@@ -726,29 +727,31 @@ async def test_prepare_next_cycle_in_tool_execution(agent, model, tool_stream, a
 
 def test_run_tool(agent, tool, generate):
     process = run_tool(
-        agent=agent,
-        tool={"toolUseId": "tool_use_id", "name": tool.tool_name, "input": {"random_string": "a_string"}},
+        agent,
+        tool_use={"toolUseId": "tool_use_id", "name": tool.tool_name, "input": {"random_string": "a_string"}},
         kwargs={},
     )
 
-    _, tru_result = generate(process)
+    tru_events, tru_result = generate(process)
+    exp_events = [{"event": "abc"}]
     exp_result = {"toolUseId": "tool_use_id", "status": "success", "content": [{"text": "a_string"}]}
 
-    assert tru_result == exp_result
+    assert tru_events == exp_events and tru_result == exp_result
 
 
 def test_run_tool_missing_tool(agent, generate):
     process = run_tool(
-        agent=agent,
-        tool={"toolUseId": "missing", "name": "missing", "input": {}},
+        agent,
+        tool_use={"toolUseId": "missing", "name": "missing", "input": {}},
         kwargs={},
     )
 
-    _, tru_result = generate(process)
+    tru_events, tru_result = generate(process)
+    exp_events = []
     exp_result = {
         "toolUseId": "missing",
         "status": "error",
         "content": [{"text": "Unknown tool: missing"}],
     }
 
-    assert tru_result == exp_result
+    assert tru_events == exp_events and tru_result == exp_result
