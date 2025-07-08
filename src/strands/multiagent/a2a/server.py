@@ -52,8 +52,7 @@ class A2AServer:
         self.strands_agent = agent
         self.name = self.strands_agent.name
         self.description = self.strands_agent.description
-        # TODO: enable configurable capabilities and request handler
-        self.capabilities = AgentCapabilities()
+        self.capabilities = AgentCapabilities(streaming=True)
         self.request_handler = DefaultRequestHandler(
             agent_executor=StrandsA2AExecutor(self.strands_agent),
             task_store=InMemoryTaskStore(),
