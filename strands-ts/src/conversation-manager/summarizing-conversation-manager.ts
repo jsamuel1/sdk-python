@@ -73,16 +73,28 @@ export type SummarizingConversationManagerConfig = {
    * provider prompt cache is reused.
    *
    * When `true`, proactive summarization reuses the agent's live system prompt
-   * and tool specs and the full message history, appending the summarization
-   * instruction as a trailing user turn. This makes the request prefix
+   * and tool specs and the full message history, delivering the summarization
+   * instruction at the tail of the request. This makes the request prefix
    * byte-identical to the live conversation's request, so the provider prompt
    * cache is hit instead of paying to re-read the history.
    *
-   * Only takes effect on proactive compression. Reactive overflow recovery
-   * always uses slice-based summarization: the cache-aligned request is a
-   * superset of the live request, so it only fits under the proactive threshold —
-   * on overflow it would overflow again. Defaults to `false` (existing
-   * slice-based behavior).
+   * Only enable this when the model has prompt caching configured (e.g.
+   * `cacheConfig` on `BedrockModel`): the aligned request re-sends the entire
+   * history, so without a cache hit it is strictly more expensive than the
+   * slice-based path.
+   *
+   * Note a semantic difference from the slice-based path: the model sees the
+   * entire history — including the recent messages that are preserved verbatim —
+   * rather than only the oldest slice being summarized. The default instruction
+   * tells the model those recent messages are preserved and should be excluded
+   * from the summary.
+   *
+   * Only takes effect on proactive compression, and is ignored when a `model`
+   * override is configured (a different model cannot reuse the live model's
+   * cache). Reactive overflow recovery always uses slice-based summarization:
+   * the cache-aligned request is a superset of the live request, so it only
+   * fits under the proactive threshold — on overflow it would overflow again.
+   * Defaults to `false` (existing slice-based behavior).
    */
   cacheAligned?: boolean
 }
@@ -124,11 +136,13 @@ export class SummarizingConversationManager extends ConversationManager {
     this._cacheAligned = config?.cacheAligned ?? false
 
     if (this._cacheAligned && config?.model) {
-      logger.warn('cache_aligned=<true> | model override defeats cache alignment; summaries will miss the prompt cache')
+      logger.warn(
+        'cache_aligned=<true> | model override defeats cache alignment | summaries will miss the prompt cache'
+      )
     }
     if (this._cacheAligned && this._compressionThreshold === undefined) {
       logger.warn(
-        'cache_aligned=<true> | cacheAligned only takes effect on proactive compression; reactive overflow uses slice-based summarization'
+        'cache_aligned=<true> | cacheAligned only takes effect on proactive compression | reactive overflow uses slice-based summarization'
       )
     }
   }

@@ -30,6 +30,20 @@ function toolResultMsg(toolUseId: string, text = 'result'): Message {
   })
 }
 
+/** Mock model whose aggregated stream resolves to a single assistant text message. */
+function mockModel(summaryText: string) {
+  const message = new Message({ role: 'assistant', content: [new TextBlock(summaryText)] })
+  return {
+    streamAggregated: vi.fn(() => ({
+      next: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: undefined })
+        .mockResolvedValueOnce({ done: true, value: { message } }),
+      [Symbol.asyncIterator]: vi.fn(),
+    })),
+  }
+}
+
 describe('adjustSplitPointForToolPairs', () => {
   it('returns split point when message is plain text', () => {
     const messages = [textMsg('user', 'hello'), textMsg('assistant', 'hi'), textMsg('user', 'bye')]
@@ -153,19 +167,6 @@ describe('partitionPinned', () => {
 })
 
 describe('generateSummary', () => {
-  function mockModel(summaryText: string) {
-    const message = new Message({ role: 'assistant', content: [new TextBlock(summaryText)] })
-    return {
-      streamAggregated: vi.fn(() => ({
-        next: vi
-          .fn()
-          .mockResolvedValueOnce({ done: false, value: undefined })
-          .mockResolvedValueOnce({ done: true, value: { message } }),
-        [Symbol.asyncIterator]: vi.fn(),
-      })),
-    }
-  }
-
   it('returns a user-role message', async () => {
     const model = mockModel('Summary of conversation')
     const messages = [textMsg('user', 'hello'), textMsg('assistant', 'hi')]
@@ -225,19 +226,6 @@ describe('generateSummary', () => {
 })
 
 describe('generateSummaryCacheAligned', () => {
-  function mockModel(summaryText: string) {
-    const message = new Message({ role: 'assistant', content: [new TextBlock(summaryText)] })
-    return {
-      streamAggregated: vi.fn(() => ({
-        next: vi
-          .fn()
-          .mockResolvedValueOnce({ done: false, value: undefined })
-          .mockResolvedValueOnce({ done: true, value: { message } }),
-        [Symbol.asyncIterator]: vi.fn(),
-      })),
-    }
-  }
-
   const toolSpecs: ToolSpec[] = [{ name: 'search', description: 'search tool', inputSchema: { type: 'object' } }]
 
   it('returns a user-role message', async () => {

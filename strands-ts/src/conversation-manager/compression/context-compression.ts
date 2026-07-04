@@ -40,18 +40,18 @@ Example format:
 * Tool X: Result Y`
 
 /**
- * Default instruction appended as a trailing user turn when generating a
- * cache-aligned summary.
+ * Default instruction delivered at the tail of a cache-aligned summary request
+ * (merged into the final user message, or appended as a new user turn).
  *
  * Unlike {@link DEFAULT_SUMMARIZATION_PROMPT} (which is delivered as a system
- * prompt), this text is delivered as a normal user message so the request
+ * prompt), this text is delivered as normal user content so the request
  * prefix — system prompt, tool specs, and message history — stays byte-identical
  * to the live conversation's request and the provider prompt cache is reused.
  * It shares {@link SUMMARIZATION_REQUIREMENTS} with the system-prompt variant
  * rather than relying on a summarization-specific system prompt.
  */
-export const DEFAULT_SUMMARIZATION_INSTRUCTION = `Summarize the conversation so far so it can be handed off with the recent \
-messages preserved.
+export const DEFAULT_SUMMARIZATION_INSTRUCTION = `Summarize the conversation so far. The most recent messages will be \
+preserved verbatim alongside the summary, so exclude them from the summary and focus on the earlier conversation.
 
 ${SUMMARIZATION_REQUIREMENTS}`
 
@@ -142,6 +142,29 @@ export function findValidTrimPoint(messages: Message[], startIndex: number): num
 }
 
 /**
+ * Drain an aggregated model stream and wrap the final response in a
+ * user-role summary message.
+ *
+ * @throws If the model fails to produce a response
+ */
+async function drainSummaryResponse(stream: ReturnType<Model['streamAggregated']>): Promise<Message> {
+  let result: Awaited<ReturnType<typeof stream.next>> | undefined
+  for (;;) {
+    result = await stream.next()
+    if (result.done) break
+  }
+
+  if (!result?.done || !result.value) {
+    throw new Error('Failed to generate summary: no response from model')
+  }
+
+  return new Message({
+    role: 'user',
+    content: result.value.message.content,
+  })
+}
+
+/**
  * Generate a summary of the provided messages by calling the model.
  *
  * @returns A user-role message containing the model-generated summary
@@ -160,24 +183,34 @@ export async function generateSummary(
     }),
   ]
 
-  const stream = model.streamAggregated(summarizationMessages, {
-    systemPrompt: systemPrompt ?? DEFAULT_SUMMARIZATION_PROMPT,
-  })
+  return await drainSummaryResponse(
+    model.streamAggregated(summarizationMessages, {
+      systemPrompt: systemPrompt ?? DEFAULT_SUMMARIZATION_PROMPT,
+    })
+  )
+}
 
-  let result: Awaited<ReturnType<typeof stream.next>> | undefined
-  for (;;) {
-    result = await stream.next()
-    if (result.done) break
-  }
+/**
+ * Options for {@link generateSummaryCacheAligned}.
+ */
+export interface CacheAlignedSummaryOptions {
+  /**
+   * The agent's live system prompt, reused verbatim so the request prefix
+   * matches the live conversation's request.
+   */
+  systemPrompt?: SystemPrompt | undefined
 
-  if (!result?.done || !result.value) {
-    throw new Error('Failed to generate summary: no response from model')
-  }
+  /**
+   * The agent's live tool specs, reused verbatim so the request prefix
+   * matches the live conversation's request.
+   */
+  toolSpecs?: ToolSpec[] | undefined
 
-  return new Message({
-    role: 'user',
-    content: result.value.message.content,
-  })
+  /**
+   * Summarization instruction delivered at the tail of the request.
+   * Defaults to {@link DEFAULT_SUMMARIZATION_INSTRUCTION}.
+   */
+  instruction?: string | undefined
 }
 
 /**
@@ -205,11 +238,7 @@ export async function generateSummary(
 export async function generateSummaryCacheAligned(
   allMessages: Message[],
   model: Model,
-  options: {
-    systemPrompt?: SystemPrompt | undefined
-    toolSpecs?: ToolSpec[] | undefined
-    instruction?: string | undefined
-  }
+  options: CacheAlignedSummaryOptions
 ): Promise<Message> {
   const instructionBlock = new TextBlock(options.instruction ?? DEFAULT_SUMMARIZATION_INSTRUCTION)
 
@@ -237,29 +266,16 @@ export async function generateSummaryCacheAligned(
     streamOptions.toolSpecs = options.toolSpecs
   }
 
-  const stream = model.streamAggregated(request, streamOptions)
-
-  let result: Awaited<ReturnType<typeof stream.next>> | undefined
-  for (;;) {
-    result = await stream.next()
-    if (result.done) break
-  }
-
-  if (!result?.done || !result.value) {
-    throw new Error('Failed to generate summary: no response from model')
-  }
+  const summary = await drainSummaryResponse(model.streamAggregated(request, streamOptions))
 
   // The aligned request carries the live tool specs, so the model may answer with a tool call
   // instead of a summary. Splicing that into history would leave a dangling toolUse without a
   // toolResult — reject it so the caller can fall back to slice-based summarization.
-  if (result.value.message.content.some((block) => block.type === 'toolUseBlock')) {
+  if (summary.content.some((block) => block.type === 'toolUseBlock')) {
     throw new Error('Failed to generate summary: model responded with tool use instead of a summary')
   }
 
-  return new Message({
-    role: 'user',
-    content: result.value.message.content,
-  })
+  return summary
 }
 
 export type MessageTypeFilter = 'tools' | 'messages' | 'all'
