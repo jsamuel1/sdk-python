@@ -101,6 +101,13 @@ export class SummarizingConversationManager extends ConversationManager {
   private readonly _summaryRatio: number
   private readonly _preserveRecentMessages: number
   private readonly _summarizationSystemPrompt: string
+  /**
+   * The raw user-supplied `summarizationSystemPrompt`, without the default applied.
+   * The cache-aligned path must distinguish "user configured a prompt" (use it as the
+   * trailing instruction) from "default" (use {@link DEFAULT_SUMMARIZATION_INSTRUCTION},
+   * which is purpose-built for user-turn delivery — the default system prompt is not).
+   */
+  private readonly _customSummarizationPrompt: string | undefined
   private readonly _pinFirst: number | undefined
   private readonly _cacheAligned: boolean
   private _pinFirstApplied = false
@@ -111,6 +118,7 @@ export class SummarizingConversationManager extends ConversationManager {
     // clamped [0.1, 0.8]
     this._summaryRatio = Math.max(0.1, Math.min(0.8, config?.summaryRatio ?? 0.3))
     this._preserveRecentMessages = config?.preserveRecentMessages ?? 10
+    this._customSummarizationPrompt = config?.summarizationSystemPrompt
     this._summarizationSystemPrompt = config?.summarizationSystemPrompt ?? DEFAULT_SUMMARIZATION_PROMPT
     this._pinFirst = config?.pinFirst != null ? Math.max(0, config.pinFirst) : undefined
     this._cacheAligned = config?.cacheAligned ?? false
@@ -200,13 +208,15 @@ export class SummarizingConversationManager extends ConversationManager {
     // system prompt + tool specs so the request prefix matches the live turn and hits the prompt
     // cache. It only fits under the proactive threshold: the cache-aligned request is a superset of
     // the live request, so on reactive overflow it would overflow again — hence the slice-based
-    // fallback there (and when cacheAligned is off, or the tail can't take an appended user turn).
+    // fallback there (and when cacheAligned is off, or the tail can't carry the instruction).
     let summaryMessage: Message
     if (this._cacheAligned && proactive && this._isValidAppendTail(messages)) {
       summaryMessage = await generateSummaryCacheAligned(messages, model, {
         systemPrompt: agent.systemPrompt,
         toolSpecs: agent.toolRegistry.list().map((tool) => tool.toolSpec),
-        instruction: this._summarizationSystemPrompt,
+        // Only a user-supplied prompt overrides the instruction; otherwise
+        // DEFAULT_SUMMARIZATION_INSTRUCTION applies inside generateSummaryCacheAligned.
+        instruction: this._customSummarizationPrompt,
       })
     } else {
       if (this._cacheAligned && proactive) {
@@ -223,9 +233,10 @@ export class SummarizingConversationManager extends ConversationManager {
   }
 
   /**
-   * Returns `true` if a user turn can be appended after the last message without
-   * breaking a tool-use/result pair — i.e. the last message is not an assistant
-   * toolUse still awaiting its toolResult. Empty histories are valid.
+   * Returns `true` if the summarization instruction can be delivered at the tail —
+   * merged into a trailing user message, or appended as a new user turn after an
+   * assistant text message — i.e. the last message is not an assistant toolUse
+   * still awaiting its toolResult. Empty histories are valid.
    */
   private _isValidAppendTail(messages: Message[]): boolean {
     const last = messages[messages.length - 1]

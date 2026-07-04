@@ -184,10 +184,19 @@ export async function generateSummary(
  * Generate a summary using a cache-aligned request.
  *
  * The request reuses the agent's live system prompt and tool specs and the full
- * message history, appending the summarization instruction as a trailing user
- * turn. This keeps the request prefix byte-identical to the live conversation's
- * request so the provider prompt cache is reused, rather than sending a fresh
+ * message history, delivering the summarization instruction at the tail. This
+ * keeps the request prefix byte-identical to the live conversation's request so
+ * the provider prompt cache is reused, rather than sending a fresh
  * summarization-only request that would miss the cache.
+ *
+ * When the history ends with a user message (always the case at the proactive
+ * compression trigger — the upcoming turn's input is already appended), the
+ * instruction is merged into a clone of that final user message as an
+ * additional text block. Appending it as a new turn would produce consecutive
+ * user roles, which providers like Bedrock reject for Anthropic models. The
+ * final message lies beyond the previous turn's cache point, so the cached
+ * prefix `messages[0..n-2]` is untouched either way. When the history ends
+ * with an assistant message, the instruction is appended as a new user turn.
  *
  * @returns A user-role message containing the model-generated summary
  * @throws If the model fails to produce a response
@@ -195,15 +204,27 @@ export async function generateSummary(
 export async function generateSummaryCacheAligned(
   allMessages: Message[],
   model: Model,
-  options: { systemPrompt?: SystemPrompt | undefined; toolSpecs?: ToolSpec[] | undefined; instruction?: string }
+  options: {
+    systemPrompt?: SystemPrompt | undefined
+    toolSpecs?: ToolSpec[] | undefined
+    instruction?: string | undefined
+  }
 ): Promise<Message> {
-  const request = [
-    ...allMessages,
-    new Message({
+  const instructionBlock = new TextBlock(options.instruction ?? DEFAULT_SUMMARIZATION_INSTRUCTION)
+
+  const last = allMessages[allMessages.length - 1]
+  let request: Message[]
+  if (last && last.role === 'user') {
+    // Clone rather than mutate: the live history must not carry the instruction.
+    const merged = new Message({
       role: 'user',
-      content: [new TextBlock(options.instruction ?? DEFAULT_SUMMARIZATION_INSTRUCTION)],
-    }),
-  ]
+      content: [...last.content, instructionBlock],
+      ...(last.metadata !== undefined && { metadata: last.metadata }),
+    })
+    request = [...allMessages.slice(0, -1), merged]
+  } else {
+    request = [...allMessages, new Message({ role: 'user', content: [instructionBlock] })]
+  }
 
   // Only set keys that are defined so the request prefix (system prompt, tool specs) matches the
   // live turn exactly under exactOptionalPropertyTypes.

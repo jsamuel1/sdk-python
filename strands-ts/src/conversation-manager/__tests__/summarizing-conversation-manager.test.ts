@@ -4,7 +4,7 @@ import { ContextWindowOverflowError, Message, TextBlock, ToolUseBlock, ToolResul
 import { AfterModelCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { createMockAgent, invokeTrackedHook } from '../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
-import { DEFAULT_SUMMARIZATION_PROMPT } from '../compression/context-compression.js'
+import { DEFAULT_SUMMARIZATION_INSTRUCTION, DEFAULT_SUMMARIZATION_PROMPT } from '../compression/context-compression.js'
 import type { Model, BaseModelConfig, StreamOptions } from '../../models/model.js'
 import type { ToolSpec } from '../../tools/types.js'
 import type { ToolRegistry } from '../../registry/tool-registry.js'
@@ -527,6 +527,123 @@ describe('SummarizingConversationManager', () => {
       expect(mockAgent.messages[0]!.role).toBe('user')
       expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Summary of conversation' })
       expect(mockAgent.messages.slice(-2)).toEqual(lastTwo)
+    })
+
+    it('proactive aligned request carries DEFAULT_SUMMARIZATION_INSTRUCTION as the trailing turn by default', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      // Assistant tail: the instruction is appended as its own user turn
+      const messages = makeMessages(20)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      const [calledMessages] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      const trailing = calledMessages[calledMessages.length - 1]!
+      expect(trailing.role).toBe('user')
+      expect(trailing.content).toHaveLength(1)
+      // The purpose-built user-turn instruction, not the summarization system prompt
+      expect((trailing.content[0] as TextBlock).text).toBe(DEFAULT_SUMMARIZATION_INSTRUCTION)
+    })
+
+    it('proactive aligned request carries a user-supplied summarizationSystemPrompt as the instruction', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+        summarizationSystemPrompt: 'Custom summarization override',
+      })
+      const messages = makeMessages(20)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      const [calledMessages] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      const trailing = calledMessages[calledMessages.length - 1]!
+      expect(trailing.role).toBe('user')
+      expect((trailing.content[0] as TextBlock).text).toBe('Custom summarization override')
+    })
+
+    it('proactive trigger through the BeforeModelCallEvent hook merges the instruction into the user-message tail', async () => {
+      const model = new MockMessageModel()
+      model.updateConfig({ modelId: 'test-model', contextWindowLimit: 1000 })
+      model.addTurn({ type: 'textBlock', text: 'Summary of conversation' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: { compressionThreshold: 0.7 },
+        cacheAligned: true,
+      })
+      // 21 messages: at the proactive trigger the tail is always the upcoming turn's USER message
+      const messages = makeMessages(21)
+      const liveHistory = [...messages]
+      expect(liveHistory[20]!.role).toBe('user')
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+      manager.initAgent(mockAgent)
+
+      const event = new BeforeModelCallEvent({
+        agent: mockAgent,
+        model: model as unknown as Model,
+        invocationState: {},
+        projectedInputTokens: 800,
+      })
+      await invokeTrackedHook(mockAgent, event)
+
+      expect(streamSpy).toHaveBeenCalledOnce()
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+
+      // (a) No consecutive user turns: roles strictly alternate across the built request
+      expect(calledMessages).toHaveLength(21)
+      for (let i = 1; i < calledMessages.length; i++) {
+        expect(calledMessages[i]!.role).not.toBe(calledMessages[i - 1]!.role)
+      }
+
+      // (b) The cached prefix is byte-identical: same message instances as the live history
+      for (let i = 0; i < 20; i++) {
+        expect(calledMessages[i]).toBe(liveHistory[i])
+      }
+
+      // (c) The instruction rides in the final user message, after the original content
+      const finalMessage = calledMessages[20]!
+      expect(finalMessage.role).toBe('user')
+      expect(finalMessage.content).toHaveLength(2)
+      expect((finalMessage.content[0] as TextBlock).text).toBe('Message 21')
+      expect((finalMessage.content[1] as TextBlock).text).toBe(DEFAULT_SUMMARIZATION_INSTRUCTION)
+      // The live history's tail message was cloned, not mutated
+      expect(finalMessage).not.toBe(liveHistory[20])
+      expect(liveHistory[20]!.content).toHaveLength(1)
+
+      // Live prefix reused as-is
+      expect(calledOptions.systemPrompt).toBe('Live system prompt')
+      expect(calledOptions.toolSpecs).toEqual(toolSpecs)
+
+      // 21 * 0.5 = 10 summarized → 1 summary + 11 remaining = 12
+      expect(mockAgent.messages).toHaveLength(12)
+      expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Summary of conversation' })
     })
 
     it('reactive reduce uses the slice-based path even when cacheAligned is set', async () => {
