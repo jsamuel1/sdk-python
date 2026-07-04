@@ -209,21 +209,33 @@ export class SummarizingConversationManager extends ConversationManager {
     // cache. It only fits under the proactive threshold: the cache-aligned request is a superset of
     // the live request, so on reactive overflow it would overflow again — hence the slice-based
     // fallback there (and when cacheAligned is off, or the tail can't carry the instruction).
-    let summaryMessage: Message
-    if (this._cacheAligned && proactive && this._isValidAppendTail(messages)) {
-      summaryMessage = await generateSummaryCacheAligned(messages, model, {
-        systemPrompt: agent.systemPrompt,
-        toolSpecs: agent.toolRegistry.list().map((tool) => tool.toolSpec),
-        // Only a user-supplied prompt overrides the instruction; otherwise
-        // DEFAULT_SUMMARIZATION_INSTRUCTION applies inside generateSummaryCacheAligned.
-        instruction: this._customSummarizationPrompt,
-      })
-    } else {
-      if (this._cacheAligned && proactive) {
-        logger.debug('cache_aligned=<true> | message tail is not a valid append point, falling back to slice-based')
+    // A configured model override also disables the aligned path: sending the full live history to
+    // a different model guarantees a cache miss, making it strictly worse than slice-based.
+    let summaryMessage: Message | undefined
+    if (this._cacheAligned && proactive && this._model === undefined) {
+      if (this._isValidAppendTail(messages)) {
+        try {
+          summaryMessage = await generateSummaryCacheAligned(messages, model, {
+            systemPrompt: agent.systemPrompt,
+            toolSpecs: agent.toolRegistry.list().map((tool) => tool.toolSpec),
+            // Only a user-supplied prompt overrides the instruction; otherwise
+            // DEFAULT_SUMMARIZATION_INSTRUCTION applies inside generateSummaryCacheAligned.
+            instruction: this._customSummarizationPrompt,
+          })
+        } catch (alignedError) {
+          // Without this fallback no compaction would happen, and a persistently failing aligned
+          // request would repeat on every subsequent turn.
+          logger.warn(
+            `error=<${alignedError}> | cache-aligned summarization failed | falling back to slice-based summarization`
+          )
+        }
+      } else {
+        logger.debug(
+          'cache_aligned=<true> | message tail is not a valid append point | falling back to slice-based summarization'
+        )
       }
-      summaryMessage = await generateSummary(toSummarize, model, this._summarizationSystemPrompt)
     }
+    summaryMessage ??= await generateSummary(toSummarize, model, this._summarizationSystemPrompt)
 
     // Replace summarized range with protected messages + summary. Recent messages stay verbatim;
     // only the oldest range is replaced, regardless of how the summary was generated.

@@ -199,7 +199,8 @@ export async function generateSummary(
  * with an assistant message, the instruction is appended as a new user turn.
  *
  * @returns A user-role message containing the model-generated summary
- * @throws If the model fails to produce a response
+ * @throws If the model fails to produce a response, or responds with tool use
+ *   instead of a text summary
  */
 export async function generateSummaryCacheAligned(
   allMessages: Message[],
@@ -246,6 +247,13 @@ export async function generateSummaryCacheAligned(
 
   if (!result?.done || !result.value) {
     throw new Error('Failed to generate summary: no response from model')
+  }
+
+  // The aligned request carries the live tool specs, so the model may answer with a tool call
+  // instead of a summary. Splicing that into history would leave a dangling toolUse without a
+  // toolResult — reject it so the caller can fall back to slice-based summarization.
+  if (result.value.message.content.some((block) => block.type === 'toolUseBlock')) {
+    throw new Error('Failed to generate summary: model responded with tool use instead of a summary')
   }
 
   return new Message({

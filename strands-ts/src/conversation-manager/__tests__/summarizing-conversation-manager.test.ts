@@ -5,6 +5,7 @@ import { AfterModelCallEvent, BeforeModelCallEvent } from '../../hooks/events.js
 import { createMockAgent, invokeTrackedHook } from '../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { DEFAULT_SUMMARIZATION_INSTRUCTION, DEFAULT_SUMMARIZATION_PROMPT } from '../compression/context-compression.js'
+import { logger } from '../../logging/logger.js'
 import type { Model, BaseModelConfig, StreamOptions } from '../../models/model.js'
 import type { ToolSpec } from '../../tools/types.js'
 import type { ToolRegistry } from '../../registry/tool-registry.js'
@@ -706,6 +707,128 @@ describe('SummarizingConversationManager', () => {
       expect(calledOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
       expect(calledOptions.toolSpecs).toBeUndefined()
       expect(mockAgent.messages).toHaveLength(11)
+    })
+
+    it('falls back to slice-based summarization when the aligned response contains tool use', async () => {
+      const model = new MockMessageModel()
+      // Aligned request carries live tool specs, so the model may answer with a tool call
+      model.addTurn({ type: 'toolUseBlock', name: 'search', toolUseId: 'id-1', input: {} })
+      model.addTurn({ type: 'textBlock', text: 'Slice summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      const messages = makeMessages(20)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      const result = await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      expect(result).toBe(true)
+      expect(streamSpy).toHaveBeenCalledTimes(2)
+      // First call: aligned (full history + trailing instruction, live tool specs)
+      const [alignedMessages, alignedOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      expect(alignedMessages).toHaveLength(21)
+      expect(alignedOptions.toolSpecs).toEqual(toolSpecs)
+      // Second call: slice-based fallback
+      const [sliceMessages, sliceOptions] = streamSpy.mock.calls[1]! as [Message[], StreamOptions]
+      expect(sliceMessages).toHaveLength(11)
+      expect(sliceOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(sliceOptions.toolSpecs).toBeUndefined()
+      // The slice summary landed; no dangling toolUse was spliced into history
+      expect(mockAgent.messages).toHaveLength(11)
+      expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Slice summary' })
+      expect(mockAgent.messages.every((m) => !m.content.some((b) => b.type === 'toolUseBlock'))).toBe(true)
+    })
+
+    it('falls back to slice-based summarization when the aligned request fails', async () => {
+      const model = new MockMessageModel()
+      model.addTurn(new Error('aligned request failed'))
+      model.addTurn({ type: 'textBlock', text: 'Slice summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      const messages = makeMessages(20)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      const result = await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      // Compaction still happens via the slice-based path
+      expect(result).toBe(true)
+      expect(streamSpy).toHaveBeenCalledTimes(2)
+      const [sliceMessages, sliceOptions] = streamSpy.mock.calls[1]! as [Message[], StreamOptions]
+      expect(sliceMessages).toHaveLength(11)
+      expect(sliceOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(mockAgent.messages).toHaveLength(11)
+      expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Slice summary' })
+    })
+
+    it('uses the slice-based path when a model override is configured, even with cacheAligned set', async () => {
+      const configModel = new MockMessageModel()
+      configModel.addTurn({ type: 'textBlock', text: 'Override summary' })
+      const streamSpy = vi.spyOn(configModel, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        model: configModel as unknown as Model,
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      const messages = makeMessages(20)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      const result = await manager.reduce({ agent: mockAgent, model: {} as Model })
+
+      expect(result).toBe(true)
+      expect(streamSpy).toHaveBeenCalledOnce()
+      // Slice-based: sending the full live history to a different model guarantees a cache miss
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      expect(calledMessages).toHaveLength(11)
+      expect(calledOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(calledOptions.toolSpecs).toBeUndefined()
+      expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Override summary' })
+    })
+
+    it('warns at construction when cacheAligned is combined with a model override', () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+      try {
+        new SummarizingConversationManager({
+          model: new MockMessageModel() as unknown as Model,
+          proactiveCompression: true,
+          cacheAligned: true,
+        })
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('model override defeats cache alignment'))
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it('warns at construction when cacheAligned is set without proactive compression', () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+      try {
+        new SummarizingConversationManager({ cacheAligned: true })
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('only takes effect on proactive compression'))
+      } finally {
+        warnSpy.mockRestore()
+      }
     })
 
     it('proactive reduce with a dangling tool-use tail falls back to the slice-based path', async () => {

@@ -340,4 +340,21 @@ describe('generateSummaryCacheAligned', () => {
       'Failed to generate summary'
     )
   })
+
+  it('throws if the model responds with tool use instead of a text summary', async () => {
+    const message = new Message({
+      role: 'assistant',
+      content: [new ToolUseBlock({ toolUseId: 'id-1', name: 'search', input: {} })],
+    })
+    const model = {
+      streamAggregated: vi.fn(() => ({
+        next: vi.fn().mockResolvedValueOnce({ done: true, value: { message } }),
+        [Symbol.asyncIterator]: vi.fn(),
+      })),
+    }
+
+    await expect(generateSummaryCacheAligned([textMsg('user', 'hello')], model as any, { toolSpecs })).rejects.toThrow(
+      'model responded with tool use'
+    )
+  })
 })
