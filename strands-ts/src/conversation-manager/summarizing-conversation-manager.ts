@@ -16,8 +16,10 @@ import { applyPinFirst, partitionPinned } from './compression/pin-message.js'
 import {
   adjustSplitPointForToolPairs,
   generateSummary,
+  generateSummaryCacheAligned,
   DEFAULT_SUMMARIZATION_PROMPT,
 } from './compression/context-compression.js'
+import type { Message } from '../types/messages.js'
 import { logger } from '../logging/logger.js'
 import { normalizeError } from '../errors.js'
 import type { Model } from '../models/model.js'
@@ -65,6 +67,24 @@ export type SummarizingConversationManagerConfig = {
    * Pinned messages are protected from summarization and compacted to the front.
    */
   pinFirst?: number
+
+  /**
+   * Align the summarization request with the live conversation's request so the
+   * provider prompt cache is reused.
+   *
+   * When `true`, proactive summarization reuses the agent's live system prompt
+   * and tool specs and the full message history, appending the summarization
+   * instruction as a trailing user turn. This makes the request prefix
+   * byte-identical to the live conversation's request, so the provider prompt
+   * cache is hit instead of paying to re-read the history.
+   *
+   * Only takes effect on proactive compression. Reactive overflow recovery
+   * always uses slice-based summarization: the cache-aligned request is a
+   * superset of the live request, so it only fits under the proactive threshold —
+   * on overflow it would overflow again. Defaults to `false` (existing
+   * slice-based behavior).
+   */
+  cacheAligned?: boolean
 }
 
 /**
@@ -82,6 +102,7 @@ export class SummarizingConversationManager extends ConversationManager {
   private readonly _preserveRecentMessages: number
   private readonly _summarizationSystemPrompt: string
   private readonly _pinFirst: number | undefined
+  private readonly _cacheAligned: boolean
   private _pinFirstApplied = false
 
   constructor(config?: SummarizingConversationManagerConfig) {
@@ -92,6 +113,16 @@ export class SummarizingConversationManager extends ConversationManager {
     this._preserveRecentMessages = config?.preserveRecentMessages ?? 10
     this._summarizationSystemPrompt = config?.summarizationSystemPrompt ?? DEFAULT_SUMMARIZATION_PROMPT
     this._pinFirst = config?.pinFirst != null ? Math.max(0, config.pinFirst) : undefined
+    this._cacheAligned = config?.cacheAligned ?? false
+
+    if (this._cacheAligned && config?.model) {
+      logger.warn('cache_aligned=<true> | model override defeats cache alignment; summaries will miss the prompt cache')
+    }
+    if (this._cacheAligned && this._compressionThreshold === undefined) {
+      logger.warn(
+        'cache_aligned=<true> | cacheAligned only takes effect on proactive compression; reactive overflow uses slice-based summarization'
+      )
+    }
   }
 
   /**
@@ -108,7 +139,8 @@ export class SummarizingConversationManager extends ConversationManager {
    */
   async reduce({ agent, model, error }: ConversationManagerReduceOptions): Promise<boolean> {
     try {
-      return await this._summarizeOldest(agent, this._model ?? model)
+      // `error === undefined` means proactive compression; a set error means reactive overflow recovery.
+      return await this._summarizeOldest(agent, this._model ?? model, error === undefined)
     } catch (summarizationError) {
       if (error) {
         // Reactive: rethrow so the ContextWindowOverflowError propagates
@@ -128,9 +160,10 @@ export class SummarizingConversationManager extends ConversationManager {
    *
    * @param agent - The agent instance
    * @param model - The model to use for summarization
+   * @param proactive - `true` for proactive compression, `false` for reactive overflow recovery
    * @returns `true` if the history was reduced, `false` otherwise
    */
-  private async _summarizeOldest(agent: LocalAgent, model: Model): Promise<boolean> {
+  private async _summarizeOldest(agent: LocalAgent, model: Model, proactive: boolean): Promise<boolean> {
     const messages = agent.messages
 
     // Calculate how many messages to summarize
@@ -163,12 +196,44 @@ export class SummarizingConversationManager extends ConversationManager {
       return false
     }
 
-    // Generate summary via model call
-    const summaryMessage = await generateSummary(toSummarize, model, this._summarizationSystemPrompt)
+    // Generate the summary. The cache-aligned path sends the full history with the agent's live
+    // system prompt + tool specs so the request prefix matches the live turn and hits the prompt
+    // cache. It only fits under the proactive threshold: the cache-aligned request is a superset of
+    // the live request, so on reactive overflow it would overflow again — hence the slice-based
+    // fallback there (and when cacheAligned is off, or the tail can't take an appended user turn).
+    let summaryMessage: Message
+    if (this._cacheAligned && proactive && this._isValidAppendTail(messages)) {
+      summaryMessage = await generateSummaryCacheAligned(messages, model, {
+        systemPrompt: agent.systemPrompt,
+        toolSpecs: agent.toolRegistry.list().map((tool) => tool.toolSpec),
+        instruction: this._summarizationSystemPrompt,
+      })
+    } else {
+      if (this._cacheAligned && proactive) {
+        logger.debug('cache_aligned=<true> | message tail is not a valid append point, falling back to slice-based')
+      }
+      summaryMessage = await generateSummary(toSummarize, model, this._summarizationSystemPrompt)
+    }
 
-    // Replace summarized range with protected messages + summary
+    // Replace summarized range with protected messages + summary. Recent messages stay verbatim;
+    // only the oldest range is replaced, regardless of how the summary was generated.
     messages.splice(0, messagesToSummarizeCount, ...protectedToPreserve, summaryMessage)
 
     return true
+  }
+
+  /**
+   * Returns `true` if a user turn can be appended after the last message without
+   * breaking a tool-use/result pair — i.e. the last message is not an assistant
+   * toolUse still awaiting its toolResult. Empty histories are valid.
+   */
+  private _isValidAppendTail(messages: Message[]): boolean {
+    const last = messages[messages.length - 1]
+    if (!last) {
+      return true
+    }
+    const hasToolUse = last.content.some((block) => block.type === 'toolUseBlock')
+    const hasToolResult = last.content.some((block) => block.type === 'toolResultBlock')
+    return !(hasToolUse && !hasToolResult)
   }
 }

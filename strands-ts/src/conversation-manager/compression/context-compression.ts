@@ -1,10 +1,14 @@
 import { Message, TextBlock } from '../../types/messages.js'
-import type { Model } from '../../models/model.js'
+import type { SystemPrompt } from '../../types/messages.js'
+import type { Model, StreamOptions } from '../../models/model.js'
+import type { ToolSpec } from '../../tools/types.js'
 
-export const DEFAULT_SUMMARIZATION_PROMPT = `You are a conversation summarizer. Provide a concise summary of the conversation \
-history.
-
-Format Requirements:
+/**
+ * Requirements shared by {@link DEFAULT_SUMMARIZATION_PROMPT} and
+ * {@link DEFAULT_SUMMARIZATION_INSTRUCTION} — the two texts differ only in
+ * their opening line (persona vs. imperative) and the trailing example block.
+ */
+const SUMMARIZATION_REQUIREMENTS = `Format Requirements:
 - You MUST create a structured and concise summary in bullet-point format.
 - You MUST NOT respond conversationally.
 - You MUST NOT address the user directly.
@@ -19,7 +23,12 @@ Your task is to create a structured summary document:
 - It MUST contain bullet points for all significant tools executed and their results
 - It MUST contain bullet points for any code or technical information shared
 - It MUST contain a section of key insights gained
-- It MUST format the summary in the third person
+- It MUST format the summary in the third person`
+
+export const DEFAULT_SUMMARIZATION_PROMPT = `You are a conversation summarizer. Provide a concise summary of the conversation \
+history.
+
+${SUMMARIZATION_REQUIREMENTS}
 
 Example format:
 
@@ -29,6 +38,22 @@ Example format:
 
 ## Tools Executed
 * Tool X: Result Y`
+
+/**
+ * Default instruction appended as a trailing user turn when generating a
+ * cache-aligned summary.
+ *
+ * Unlike {@link DEFAULT_SUMMARIZATION_PROMPT} (which is delivered as a system
+ * prompt), this text is delivered as a normal user message so the request
+ * prefix — system prompt, tool specs, and message history — stays byte-identical
+ * to the live conversation's request and the provider prompt cache is reused.
+ * It shares {@link SUMMARIZATION_REQUIREMENTS} with the system-prompt variant
+ * rather than relying on a summarization-specific system prompt.
+ */
+export const DEFAULT_SUMMARIZATION_INSTRUCTION = `Summarize the conversation so far so it can be handed off with the recent \
+messages preserved.
+
+${SUMMARIZATION_REQUIREMENTS}`
 
 /**
  * Adjust a split point forward to avoid breaking tool use/result pairs.
@@ -138,6 +163,59 @@ export async function generateSummary(
   const stream = model.streamAggregated(summarizationMessages, {
     systemPrompt: systemPrompt ?? DEFAULT_SUMMARIZATION_PROMPT,
   })
+
+  let result: Awaited<ReturnType<typeof stream.next>> | undefined
+  for (;;) {
+    result = await stream.next()
+    if (result.done) break
+  }
+
+  if (!result?.done || !result.value) {
+    throw new Error('Failed to generate summary: no response from model')
+  }
+
+  return new Message({
+    role: 'user',
+    content: result.value.message.content,
+  })
+}
+
+/**
+ * Generate a summary using a cache-aligned request.
+ *
+ * The request reuses the agent's live system prompt and tool specs and the full
+ * message history, appending the summarization instruction as a trailing user
+ * turn. This keeps the request prefix byte-identical to the live conversation's
+ * request so the provider prompt cache is reused, rather than sending a fresh
+ * summarization-only request that would miss the cache.
+ *
+ * @returns A user-role message containing the model-generated summary
+ * @throws If the model fails to produce a response
+ */
+export async function generateSummaryCacheAligned(
+  allMessages: Message[],
+  model: Model,
+  options: { systemPrompt?: SystemPrompt | undefined; toolSpecs?: ToolSpec[] | undefined; instruction?: string }
+): Promise<Message> {
+  const request = [
+    ...allMessages,
+    new Message({
+      role: 'user',
+      content: [new TextBlock(options.instruction ?? DEFAULT_SUMMARIZATION_INSTRUCTION)],
+    }),
+  ]
+
+  // Only set keys that are defined so the request prefix (system prompt, tool specs) matches the
+  // live turn exactly under exactOptionalPropertyTypes.
+  const streamOptions: StreamOptions = {}
+  if (options.systemPrompt !== undefined) {
+    streamOptions.systemPrompt = options.systemPrompt
+  }
+  if (options.toolSpecs !== undefined) {
+    streamOptions.toolSpecs = options.toolSpecs
+  }
+
+  const stream = model.streamAggregated(request, streamOptions)
 
   let result: Awaited<ReturnType<typeof stream.next>> | undefined
   for (;;) {

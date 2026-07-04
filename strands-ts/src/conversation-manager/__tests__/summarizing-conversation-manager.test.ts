@@ -4,7 +4,10 @@ import { ContextWindowOverflowError, Message, TextBlock, ToolUseBlock, ToolResul
 import { AfterModelCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { createMockAgent, invokeTrackedHook } from '../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
-import type { Model, BaseModelConfig } from '../../models/model.js'
+import { DEFAULT_SUMMARIZATION_PROMPT } from '../compression/context-compression.js'
+import type { Model, BaseModelConfig, StreamOptions } from '../../models/model.js'
+import type { ToolSpec } from '../../tools/types.js'
+import type { ToolRegistry } from '../../registry/tool-registry.js'
 
 function textMsg(role: 'user' | 'assistant', text: string): Message {
   return new Message({ role, content: [new TextBlock(text)] })
@@ -475,6 +478,151 @@ describe('SummarizingConversationManager', () => {
 
       const texts = agent.messages.map((m) => (m.content[0] as TextBlock).text)
       expect(texts).toEqual(['pinned-middle', 'Summary', 'old-4', 'recent-1', 'recent-2'])
+    })
+  })
+
+  describe('cacheAligned', () => {
+    const toolSpecs: ToolSpec[] = [{ name: 'search', description: 'search tool', inputSchema: { type: 'object' } }]
+
+    function stubRegistry(specs: ToolSpec[]): ToolRegistry {
+      return {
+        list: () => specs.map((toolSpec) => ({ toolSpec })),
+      } as unknown as ToolRegistry
+    }
+
+    it('proactive reduce sends the live systemPrompt, toolSpecs, and full history with a trailing instruction', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary of conversation' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      const messages = makeMessages(20)
+      const lastTwo = messages.slice(-2)
+      const fullHistory = [...messages]
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      // Proactive: no error passed
+      const result = await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      expect(result).toBe(true)
+      expect(streamSpy).toHaveBeenCalledOnce()
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      // Full history (20) plus the trailing instruction turn
+      expect(calledMessages).toHaveLength(21)
+      expect(calledMessages.slice(0, 20)).toEqual(fullHistory)
+      expect(calledMessages[20]!.role).toBe('user')
+      expect(calledOptions.systemPrompt).toBe('Live system prompt')
+      expect(calledOptions.toolSpecs).toEqual(toolSpecs)
+
+      // 20 * 0.5 = 10 summarized → 1 summary + 10 remaining = 11; recent messages preserved verbatim
+      expect(mockAgent.messages).toHaveLength(11)
+      expect(mockAgent.messages[0]!.role).toBe('user')
+      expect(mockAgent.messages[0]!.content[0]!).toEqual({ type: 'textBlock', text: 'Summary of conversation' })
+      expect(mockAgent.messages.slice(-2)).toEqual(lastTwo)
+    })
+
+    it('reactive reduce uses the slice-based path even when cacheAligned is set', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      const messages = makeMessages(20)
+      const expectedSlice = messages.slice(0, 10)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      // Reactive: error passed
+      await manager.reduce({
+        agent: mockAgent,
+        model: model as unknown as Model,
+        error: new ContextWindowOverflowError('overflow'),
+      })
+
+      expect(streamSpy).toHaveBeenCalledOnce()
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      // Slice-based: only the summarize slice + the "Please summarize" request, live tool specs NOT sent
+      expect(calledMessages).toHaveLength(11)
+      expect(calledMessages.slice(0, 10)).toEqual(expectedSlice)
+      expect((calledMessages[10]!.content[0] as TextBlock).text).toBe('Please summarize this conversation.')
+      expect(calledOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(calledOptions.toolSpecs).toBeUndefined()
+    })
+
+    it('proactive reduce with cacheAligned off is identical to the slice-based path', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+      })
+      const messages = makeMessages(20)
+      const expectedSlice = messages.slice(0, 10)
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      expect(calledMessages).toHaveLength(11)
+      expect(calledMessages.slice(0, 10)).toEqual(expectedSlice)
+      expect(calledOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(calledOptions.toolSpecs).toBeUndefined()
+      expect(mockAgent.messages).toHaveLength(11)
+    })
+
+    it('proactive reduce with a dangling tool-use tail falls back to the slice-based path', async () => {
+      const model = new MockMessageModel()
+      model.addTurn({ type: 'textBlock', text: 'Summary' })
+      const streamSpy = vi.spyOn(model, 'streamAggregated')
+
+      const manager = new SummarizingConversationManager({
+        summaryRatio: 0.5,
+        preserveRecentMessages: 2,
+        proactiveCompression: true,
+        cacheAligned: true,
+      })
+      // Last message is an assistant toolUse still awaiting its result — not a valid append tail
+      const messages = [
+        ...makeMessages(19),
+        new Message({
+          role: 'assistant',
+          content: [new ToolUseBlock({ name: 'search', toolUseId: 'id-1', input: {} })],
+        }),
+      ]
+      const originalLength = messages.length
+      const mockAgent = createMockAgent({
+        messages,
+        extra: { systemPrompt: 'Live system prompt', toolRegistry: stubRegistry(toolSpecs) },
+      })
+
+      await manager.reduce({ agent: mockAgent, model: model as unknown as Model })
+
+      const [calledMessages, calledOptions] = streamSpy.mock.calls[0]! as [Message[], StreamOptions]
+      // Slice-based fallback: does not send the full history / live tool specs
+      expect(calledMessages.length).toBeLessThan(originalLength)
+      expect(calledOptions.systemPrompt).toBe(DEFAULT_SUMMARIZATION_PROMPT)
+      expect(calledOptions.toolSpecs).toBeUndefined()
     })
   })
 })
