@@ -227,6 +227,36 @@ class BedrockModel(Model):
             return "anthropic"
         return None
 
+    def _resolve_cache_strategy(self) -> str | None:
+        """Resolve the effective cache strategy from ``cache_config``.
+
+        Applies the ``"auto"`` model-support check: an ``"auto"`` strategy resolves to the model's
+        supported strategy (``"anthropic"`` for Claude/Anthropic models) or ``None`` if the model does
+        not support automatic caching. An explicit ``"anthropic"`` strategy is returned as-is.
+
+        Returns:
+            The effective strategy to apply (e.g. ``"anthropic"``), or ``None`` if caching is
+            disabled or unsupported for this model.
+        """
+        cache_config = self.config.get("cache_config")
+        if not cache_config:
+            return None
+        if cache_config.strategy == "auto":
+            return self._cache_strategy
+        return cache_config.strategy
+
+    def _build_cache_point(self) -> dict[str, Any]:
+        """Build a default cache point block, including the ``cache_config`` TTL if set.
+
+        Returns:
+            A cachePoint block, e.g. ``{"cachePoint": {"type": "default"}}``.
+        """
+        cache_point: dict[str, Any] = {"type": "default"}
+        cache_config = self.config.get("cache_config")
+        if cache_config and cache_config.ttl:
+            cache_point["ttl"] = cache_config.ttl
+        return {"cachePoint": cache_point}
+
     @override
     def update_config(self, **model_config: Unpack[BedrockConfig]) -> None:  # type: ignore
         """Update the Bedrock Model configuration with the provided arguments.
@@ -282,6 +312,12 @@ class BedrockModel(Model):
                 "cache_prompt is deprecated. Use SystemContentBlock with cachePoint instead.", UserWarning, stacklevel=3
             )
             system_blocks.append({"cachePoint": {"type": cache_prompt}})
+        # Under cache_config, add a cachePoint at the system-prompt boundary so the static system
+        # prefix is cached at a boundary that repeated calls (which vary only the last user message)
+        # can read-hit. "auto" only adds this when the model supports automatic caching (see #3144).
+        elif system_blocks and self._resolve_cache_strategy() == "anthropic":
+            if not any("cachePoint" in block for block in system_blocks):
+                system_blocks.append(cast(SystemContentBlock, self._build_cache_point()))
 
         return {
             "modelId": self.config["model_id"],
@@ -425,11 +461,7 @@ class BedrockModel(Model):
                 last_user_idx = msg_idx
 
         if last_user_idx is not None and messages[last_user_idx].get("content"):
-            cache_point: dict[str, Any] = {"type": "default"}
-            cache_config = self.config.get("cache_config")
-            if cache_config and cache_config.ttl:
-                cache_point["ttl"] = cache_config.ttl
-            messages[last_user_idx]["content"].append({"cachePoint": cache_point})
+            messages[last_user_idx]["content"].append(self._build_cache_point())
             logger.debug("msg_idx=<%s> | added cache point to last user message", last_user_idx)
 
     def _find_last_user_text_message_index(self, messages: Messages) -> int | None:
@@ -529,14 +561,12 @@ class BedrockModel(Model):
         # Inject cache point into cleaned_messages (not original messages) if cache_config is set
         cache_config = self.config.get("cache_config")
         if cache_config:
-            strategy: str | None = cache_config.strategy
-            if strategy == "auto":
-                strategy = self._cache_strategy
-                if not strategy:
-                    logger.warning(
-                        "model_id=<%s> | cache_config is enabled but this model does not support automatic caching",
-                        self.config.get("model_id"),
-                    )
+            strategy = self._resolve_cache_strategy()
+            if cache_config.strategy == "auto" and not strategy:
+                logger.warning(
+                    "model_id=<%s> | cache_config is enabled but this model does not support automatic caching",
+                    self.config.get("model_id"),
+                )
             if strategy == "anthropic":
                 self._inject_cache_point(cleaned_messages)
 

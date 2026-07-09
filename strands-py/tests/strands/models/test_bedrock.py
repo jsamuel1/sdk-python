@@ -3209,6 +3209,99 @@ def test_inject_cache_point_auto_strategy_resolves_to_anthropic_for_claude(bedro
     assert len(formatted[1]["content"]) == 1
 
 
+def test_format_request_system_cache_point_auto_claude(bedrock_client, messages):
+    """Test that cache_config auto adds a system-prompt cachePoint for a supported (Claude) model."""
+    model = BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0", cache_config=CacheConfig(strategy="auto")
+    )
+    system_prompt_content = [{"text": "You are a helpful assistant."}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == [
+        {"text": "You are a helpful assistant."},
+        {"cachePoint": {"type": "default"}},
+    ]
+
+
+def test_format_request_system_cache_point_no_tools(bedrock_client):
+    """Test that the system cachePoint is added even with no tools (the #3144 no-tools bug)."""
+    model = BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0", cache_config=CacheConfig(strategy="auto")
+    )
+    messages = [{"role": "user", "content": [{"text": "extract this candidate"}]}]
+    system_prompt_content = [{"text": "static system prompt"}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert "toolConfig" not in request
+    assert request["system"] == [
+        {"text": "static system prompt"},
+        {"cachePoint": {"type": "default"}},
+    ]
+
+
+def test_format_request_system_cache_point_anthropic_strategy(bedrock_client, messages):
+    """Test that explicit anthropic strategy adds a system cachePoint without a model-support check."""
+    model = BedrockModel(model_id="amazon.nova-pro-v1:0", cache_config=CacheConfig(strategy="anthropic"))
+    system_prompt_content = [{"text": "You are a helpful assistant."}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == [
+        {"text": "You are a helpful assistant."},
+        {"cachePoint": {"type": "default"}},
+    ]
+
+
+def test_format_request_system_cache_point_skipped_auto_non_claude(bedrock_client, messages):
+    """Test that auto strategy does NOT add a system cachePoint for a model without automatic caching."""
+    model = BedrockModel(model_id="amazon.nova-pro-v1:0", cache_config=CacheConfig(strategy="auto"))
+    system_prompt_content = [{"text": "You are a helpful assistant."}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == [{"text": "You are a helpful assistant."}]
+
+
+def test_format_request_system_cache_point_with_ttl(bedrock_client, messages):
+    """Test that the system cachePoint carries the cache_config ttl when set."""
+    model = BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0", cache_config=CacheConfig(strategy="auto", ttl="1h")
+    )
+    system_prompt_content = [{"text": "You are a helpful assistant."}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == [
+        {"text": "You are a helpful assistant."},
+        {"cachePoint": {"type": "default", "ttl": "1h"}},
+    ]
+
+
+def test_format_request_system_cache_point_not_duplicated(bedrock_client, messages):
+    """Test that an existing system cachePoint is not duplicated under cache_config auto."""
+    model = BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0", cache_config=CacheConfig(strategy="auto")
+    )
+    system_prompt_content = [{"text": "You are a helpful assistant."}, {"cachePoint": {"type": "default"}}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == system_prompt_content
+    assert sum(1 for block in request["system"] if "cachePoint" in block) == 1
+
+
+def test_format_request_system_cache_point_skipped_without_cache_config(bedrock_client, messages):
+    """Test that no system cachePoint is added when cache_config is unset."""
+    model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+    system_prompt_content = [{"text": "You are a helpful assistant."}]
+
+    request = model.format_request(messages, system_prompt_content=system_prompt_content)
+
+    assert request["system"] == [{"text": "You are a helpful assistant."}]
+
+
 def test_find_last_user_text_message_index_no_user_messages(bedrock_client):
     """Test _find_last_user_text_message_index returns None when no user text messages exist."""
     model = BedrockModel(model_id="test-model")
