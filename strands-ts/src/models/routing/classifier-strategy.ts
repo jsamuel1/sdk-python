@@ -8,6 +8,7 @@ import { logger } from '../../logging/logger.js'
 import { STRUCTURED_OUTPUT_TOOL_NAME, StructuredOutputTool } from '../../tools/structured-output-tool.js'
 import { Model } from '../model.js'
 import { Message, TextBlock } from '../../types/messages.js'
+import { instructionText, latestRequestText } from '../request-text.js'
 import type { SystemPrompt, ToolUseBlock } from '../../types/messages.js'
 import type { JSONValue } from '../../types/json.js'
 import type { RoutingCandidate } from './router.js'
@@ -18,7 +19,6 @@ const DEFAULT_AGENT_INSTRUCTIONS_CHARACTER_LIMIT = 4_000
 const DEFAULT_CANDIDATE_CHARACTER_LIMIT = 4_000
 const DEFAULT_TIMEOUT_MS = 30_000
 const CLASSIFICATION_OMISSION_MARKER = '\n...[content omitted for routing]...\n'
-const NO_REQUEST_TEXT = '[No request-bearing user message provided]'
 const DEFAULT_SYSTEM_PROMPT =
   'You are a model-routing classifier. Select exactly one candidate for the latest human request. First identify ' +
   "the request's hard requirements and complexity, then rule out candidates whose evidence shows they cannot meet " +
@@ -194,7 +194,7 @@ export class ClassifierStrategy implements RoutingStrategy {
   ): Promise<number> {
     const selection = await invokeClassifier(
       this._model,
-      latestRequestText(context.messages, this._maxMessageChars),
+      latestRequestText(context.messages, this._maxMessageChars, CLASSIFICATION_OMISSION_MARKER),
       buildClassifierSystemPrompt(profiles, context.systemPrompt, this._systemPrompt, this._maxAgentInstructionsChars),
       cancelSignal
     )
@@ -273,56 +273,6 @@ function buildCandidateProfiles(
   return profiles
 }
 
-/** Return the latest request-bearing user message as bounded safe text. */
-function latestRequestText(messages: readonly Message[], characterLimit: number): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!
-    if (message.role !== 'user') continue
-    const request = requestText(message, characterLimit)
-    if (request !== undefined) return request
-  }
-  return truncateText(NO_REQUEST_TEXT, characterLimit)
-}
-
-/** Render only safe request-bearing fields from one user message. */
-function requestText(message: Message, characterLimit: number): string | undefined {
-  const parts: string[] = []
-  for (const block of message.content) {
-    switch (block.type) {
-      case 'textBlock':
-        if (block.text.trim().length > 0) parts.push(block.text)
-        break
-      case 'guardContentBlock':
-        if (block.text !== undefined && block.text.text.trim().length > 0) parts.push('[Guarded content]')
-        break
-      case 'imageBlock':
-        parts.push('[Image]')
-        break
-      case 'documentBlock':
-        parts.push('[Document]')
-        break
-      case 'videoBlock':
-        parts.push('[Video]')
-        break
-    }
-  }
-  if (parts.length === 0) return undefined
-  return truncateText(parts.join('\n'), characterLimit)
-}
-
-/** Extract bounded text from the parent agent system prompt, omitting non-text blocks. */
-function extractBoundedAgentInstructions(systemPrompt: SystemPrompt | undefined, characterLimit: number): string {
-  if (systemPrompt === undefined) return ''
-  const instructions =
-    typeof systemPrompt === 'string'
-      ? systemPrompt
-      : systemPrompt
-          .filter((block): block is TextBlock => block.type === 'textBlock')
-          .map((block) => block.text)
-          .join('\n')
-  return truncateText(instructions, characterLimit)
-}
-
 /** Wrap the verbatim routing policy with SDK-owned rules around bounded untrusted context. */
 function buildClassifierSystemPrompt(
   profiles: readonly CandidateProfile[],
@@ -331,7 +281,7 @@ function buildClassifierSystemPrompt(
   agentInstructionsLimit: number
 ): string {
   const context = {
-    agentInstructions: extractBoundedAgentInstructions(agentSystemPrompt, agentInstructionsLimit),
+    agentInstructions: instructionText(agentSystemPrompt, agentInstructionsLimit, CLASSIFICATION_OMISSION_MARKER),
     candidates: profiles,
   }
   const serializedContext = JSON.stringify(context)
@@ -355,16 +305,6 @@ function buildClassifierSystemPrompt(
     `Return only selectedCandidateIndex as an integer from 0 through ${profiles.length - 1} through structured ` +
     'output. Do not emit prose or additional fields.'
   )
-}
-
-/** Bound text while preserving its opening and trailing request. */
-function truncateText(text: string, characterLimit: number): string {
-  if (text.length <= characterLimit) return text
-  if (characterLimit <= CLASSIFICATION_OMISSION_MARKER.length) return text.slice(0, characterLimit)
-  const availableCharacters = characterLimit - CLASSIFICATION_OMISSION_MARKER.length
-  const headCharacters = Math.floor(availableCharacters / 2)
-  const tailCharacters = availableCharacters - headCharacters
-  return `${text.slice(0, headCharacters)}${CLASSIFICATION_OMISSION_MARKER}${text.slice(-tailCharacters)}`
 }
 
 /** Return a validated positive character limit. */

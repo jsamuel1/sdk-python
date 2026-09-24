@@ -1189,6 +1189,54 @@ describe('Tracer', () => {
     })
   })
 
+  describe('decision spans', () => {
+    it('startDecisionSpan records the model and question kinds, never state', () => {
+      new Tracer().startDecisionSpan({ modelId: 'jev-1.13.0', questions: ['dept:choice', 'urgent:yesno'] })
+
+      const [spanName, options] = getStartSpanCall()
+      expect(spanName).toBe('decision')
+      expect(options.attributes).toMatchObject({
+        'gen_ai.operation.name': 'decision',
+        'strands.source': 'decision',
+        'gen_ai.request.model': 'jev-1.13.0',
+        'strands.decision.questions': ['dept:choice', 'urgent:yesno'],
+      })
+      expect(mockSpan.calls.addEvent).toEqual([])
+    })
+
+    it('endDecisionSpan records usage, response model, and answers', () => {
+      const tracer = new Tracer()
+      const span = tracer.startDecisionSpan({ modelId: 'jev', questions: ['dept:choice'] })
+
+      tracer.endDecisionSpan(span, {
+        responseModelId: 'jev-1.13.0',
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+        answers: ['dept=billing@0.910'],
+      })
+
+      expect(mockSpan.calls.setAttributes).toContainEqual({
+        attributes: expect.objectContaining({
+          'gen_ai.usage.input_tokens': 10,
+          'gen_ai.usage.output_tokens': 2,
+          'gen_ai.response.model': 'jev-1.13.0',
+          'strands.decision.answers': ['dept=billing@0.910'],
+        }),
+      })
+      expect(mockSpan.calls.setStatus).toEqual([{ status: { code: SpanStatusCode.OK } }])
+    })
+
+    it('endDecisionSpan marks an error and ignores a null span', () => {
+      const tracer = new Tracer()
+      tracer.endDecisionSpan(null, { error: new Error('ignored') })
+      const span = tracer.startDecisionSpan({ modelId: 'jev', questions: ['q:yesno'] })
+
+      tracer.endDecisionSpan(span, { error: new Error('boom') })
+
+      expect(mockSpan.calls.setStatus).toEqual([{ status: { code: SpanStatusCode.ERROR, message: 'boom' } }])
+      expect(mockSpan.calls.recordException).toHaveLength(1)
+    })
+  })
+
   describe('memory spans', () => {
     it('startMemorySearchSpan sets attributes and records the query as an event', () => {
       const tracer = new Tracer()

@@ -29,6 +29,8 @@ async function main() {
   const { OpenAIModel } = await import('@strands-agents/sdk/models/openai')
   const { AnthropicModel } = await import('@strands-agents/sdk/models/anthropic')
   const { GoogleModel } = await import('@strands-agents/sdk/models/google')
+  const { TypeSafeDecisionModel } = await import('@strands-agents/sdk/models/typesafe')
+  const { DecisionModel } = await import('@strands-agents/sdk/experimental')
 
   const { z } = await import('zod')
 
@@ -116,6 +118,11 @@ async function main() {
     throw new Error('GoalLoop from subpath should match barrel export')
   }
   console.log('✓ GoalLoop subpath export verified')
+
+  if (!(new TypeSafeDecisionModel({ apiKey: 'k' }) instanceof DecisionModel)) {
+    throw new Error('TypeSafeDecisionModel should extend the experimental DecisionModel')
+  }
+  console.log('✓ Decision model subpath exports verified')
 
   // Reference remaining imports so static analysis doesn't flag them unused.
   void OpenAIModel

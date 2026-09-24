@@ -16,3 +16,6 @@ export { Offload } from '../context-manager/strategies/offload/index.js'
 export type { OffloadTarget, OffloadConditions } from '../context-manager/strategies/offload/base.js'
 export type { TruncateConfig } from '../context-manager/methods/truncate.js'
 export type { SummarizeConfig } from '../context-manager/methods/summarize.js'
+
+// System One decision models (experimental). The TypeSafe provider is at `@strands-agents/sdk/models/typesafe`.
+export * from './decisions/index.js'

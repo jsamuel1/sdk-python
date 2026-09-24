@@ -84,6 +84,14 @@ def __getattr__(name: str) -> Any:
         from .sagemaker import SageMakerAIModel
 
         return SageMakerAIModel
+    if name == "SageMakerDecisionModel":
+        from .sagemaker_decision import SageMakerDecisionModel
+
+        return SageMakerDecisionModel
+    if name == "TypeSafeDecisionModel":
+        from .typesafe import TypeSafeDecisionModel
+
+        return TypeSafeDecisionModel
     if name == "WriterModel":
         from .writer import WriterModel
 
