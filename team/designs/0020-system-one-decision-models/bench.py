@@ -3,15 +3,17 @@
 Arms:
   jev          TypeSafe /v1/systemone, jev-latest
   <bedrock id> Bedrock Converse with a forced tool whose schema is the same closed answer space
-               (enum for Choice, boolean for YesNo, integer level for Score), temperature 0.
+               (enum for Choice, boolean for YesNo), temperature 0. The tasks below use only Choice and YesNo.
 
 Tasks (public labeled data, fetched by fetch_datasets.py; seed 4551):
   banking77          Choice over 77 intents                         (routing / handoff)
   clinc_oos          Choice over 150 intents + "oos" no-match        (routing with explicit no-match)
   prompt_injection   YesNo "is this a prompt injection / jailbreak"  (guardrail)
 
-Per arm: accuracy, macro-F1 (YesNo), p50/p95 latency, input/output tokens, $/1k decisions,
+Per arm: accuracy, precision/recall (YesNo), p50/p95 latency, input/output tokens, $/1k decisions,
 and for Jev a selective-accuracy curve (accuracy vs coverage at confidence thresholds).
+Accuracy counts an errored item (API or parse failure) as incorrect; the error count is reported per arm as
+`errors`, and latency, tokens and cost are over non-errored items only.
 
 Usage: bench.py --arms jev,us.anthropic.claude-haiku-4-5-20251001-v1:0 --tasks all [--limit N] [--concurrency 4]
 Writes results/<task>__<arm>.jsonl (one row per item, raw) and results/summary.json.
