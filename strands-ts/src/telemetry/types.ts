@@ -165,6 +165,30 @@ export interface EndNodeSpanOptions {
 }
 
 /**
+ * Options for starting a decision span.
+ */
+export interface StartDecisionSpanOptions {
+  /** The configured decision model id, or its class name when it has none. */
+  modelId: string
+  /** Question ids with their kinds, as `id:kind`. State and instructions are never recorded. */
+  questions: string[]
+}
+
+/**
+ * Options for ending a decision span.
+ */
+export interface EndDecisionSpanOptions {
+  /** The model id the provider reported. */
+  responseModelId?: string
+  /** Token usage for the decision request. */
+  usage?: Usage
+  /** Per-question top answer and confidence, as `id=answer@confidence`. */
+  answers?: string[]
+  /** Error that caused the decision to fail. */
+  error?: Error
+}
+
+/**
  * Options for starting a memory search span.
  */
 export interface StartMemorySearchSpanOptions {

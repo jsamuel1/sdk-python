@@ -3,7 +3,6 @@ title: Decision Models
 description: 'Make typed routing, model-selection, and guardrail decisions with a calibrated System One decision model such as Jev, and choose where it sits.'
 tags: [multi-agent, structured-output, interventions]
 experimental: true
-languages: python
 sourceLinks:
   - path: strands-py/src/strands/experimental/decisions/__init__.py
   - path: strands-py/src/strands/experimental/decisions/_model.py
@@ -13,6 +12,10 @@ sourceLinks:
   - path: strands-py/src/strands/experimental/decisions/_tool.py
   - path: strands-py/src/strands/models/typesafe.py
   - path: strands-py/src/strands/models/sagemaker_decision.py
+  - path: strands-ts/src/experimental/decisions/decision-model.ts
+  - path: strands-ts/src/experimental/decisions/schema.ts
+  - path: strands-ts/src/experimental/decisions/decision-strategy.ts
+  - path: strands-ts/src/models/typesafe.ts
   - path: site/docs/examples/python/system_one/support_triage.py
   - path: site/docs/examples/python/system_one/mixture_of_models.py
   - path: site/docs/examples/python/system_one/browser_next_action.py
@@ -34,18 +37,37 @@ comes with an honest "I'm not sure".
 [Jev](https://docs.typesafe.ai/concepts/system-one) by TypeSafe is the first System One
 model and the first provider. Any other decision model implements the same interface.
 
+:::note[TypeScript coverage]
+TypeScript has `DecisionModel`, the Zod schema helpers, `TypeSafeDecisionModel`, and
+`DecisionStrategy`. `LLMDecisionModel`, `DecisionAgent`, the graph helpers,
+`DecisionGuard`, and `decision_tool` are Python-only for now.
+:::
+
 ## Install and ask a first question
 
 Install the extra and set your key:
 
+<Tabs>
+  <Tab label="Python">
 ```bash
 pip install 'strands-agents[typesafe]'
 export TYPESAFE_API_KEY=...
 ```
+  </Tab>
+  <Tab label="TypeScript">
+```bash
+npm install @strands-agents/sdk @typesafe-ai/sdk zod
+export TYPESAFE_API_KEY=...
+```
+  </Tab>
+</Tabs>
 
-Declare the decision as a Pydantic model. Field types say what is decided; the marker says
-how to ask. All fields are asked together in one request.
+Declare the decision as a schema: a Pydantic model in Python, a Zod object in TypeScript.
+Field types say what is decided; the marker says how to ask. All fields are asked together
+in one request.
 
+<Tabs>
+  <Tab label="Python">
 ```python
 import asyncio
 from typing import Annotated, Literal
@@ -84,6 +106,15 @@ asyncio.run(main())
 # department='billing' urgent=True frustration=1.49
 # 1.0
 ```
+  </Tab>
+  <Tab label="TypeScript">
+```typescript
+--8<-- "user-guide/sdk/experimental/decision-models_imports.ts:first_question_imports"
+
+--8<-- "user-guide/sdk/experimental/decision-models.ts:first_question"
+```
+  </Tab>
+</Tabs>
 
 `decision.output` is your model, typed. `decision.answers` keeps every field's full
 distribution, so code decides what "confident enough" means. A `str` or `int` field raises
@@ -281,6 +312,8 @@ declines, and the router serves its first candidate, so put your safe default fi
 `DecisionStrategy` with a calibrated model. When you only have an LLM, use
 `ClassifierStrategy`: an LLM's answer carries no confidence to decline on.
 
+<Tabs>
+  <Tab label="Python">
 ```python
 from strands import Agent
 from strands.experimental.decisions import DecisionStrategy
@@ -304,6 +337,15 @@ router = ModelRouter(
 )
 agent = Agent(model=router)
 ```
+  </Tab>
+  <Tab label="TypeScript">
+```typescript
+--8<-- "user-guide/sdk/experimental/decision-models_imports.ts:model_selection_imports"
+
+--8<-- "user-guide/sdk/experimental/decision-models.ts:model_selection"
+```
+  </Tab>
+</Tabs>
 
 ### Guardrails: proceed, confirm, or deny each tool call
 

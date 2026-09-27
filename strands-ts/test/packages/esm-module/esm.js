@@ -27,6 +27,8 @@ import { BedrockModel as BedrockFromSubpath } from '@strands-agents/sdk/models/b
 import { OpenAIModel } from '@strands-agents/sdk/models/openai'
 import { AnthropicModel } from '@strands-agents/sdk/models/anthropic'
 import { GoogleModel } from '@strands-agents/sdk/models/google'
+import { TypeSafeDecisionModel } from '@strands-agents/sdk/models/typesafe'
+import { DecisionModel, DecisionStrategy, choice } from '@strands-agents/sdk/experimental'
 
 import { z } from 'zod'
 
@@ -128,6 +130,12 @@ if (BedrockFromSubpath !== BedrockModel) {
 }
 if (ModelRouterFromSubpath !== ModelRouter) {
   throw new Error('ModelRouter from subpath should match main export')
+}
+if (!(new TypeSafeDecisionModel({ apiKey: 'k' }) instanceof DecisionModel)) {
+  throw new Error('TypeSafeDecisionModel should extend the experimental DecisionModel')
+}
+if (typeof DecisionStrategy !== 'function' || typeof choice !== 'function') {
+  throw new Error('decision exports missing from @strands-agents/sdk/experimental')
 }
 console.log('✓ Model subpath exports verified')
 

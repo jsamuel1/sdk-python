@@ -40,6 +40,10 @@
       "types": "./dist/src/models/google/index.d.ts",
       "default": "./dist/src/models/google/index.js"
     },
+    "./models/typesafe": {
+      "types": "./dist/src/models/typesafe.d.ts",
+      "default": "./dist/src/models/typesafe.js"
+    },
     "./models/vercel": {
       "types": "./dist/src/models/vercel.d.ts",
       "default": "./dist/src/models/vercel.js"
@@ -256,6 +260,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.4",
     "@types/turndown": "^5.0.6",
+    "@typesafe-ai/sdk": "^0.6.0",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitest/browser": "^4.1.10",
@@ -310,6 +315,7 @@
     "@opentelemetry/sdk-trace-node": "^2.6.1",
     "@smithy/types": "^4.15.1",
     "@tobilu/qmd": "^2.8.0",
+    "@typesafe-ai/sdk": "^0.6.0",
     "express": "^5.1.0",
     "openai": "^6.45.0",
     "turndown": "^7.2.4",
@@ -377,6 +383,9 @@
       "optional": true
     },
     "turndown": {
+      "optional": true
+    },
+    "@typesafe-ai/sdk": {
       "optional": true
     }
   },

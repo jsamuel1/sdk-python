@@ -42,6 +42,8 @@ import type {
   EndMultiAgentSpanOptions,
   StartNodeSpanOptions,
   EndNodeSpanOptions,
+  StartDecisionSpanOptions,
+  EndDecisionSpanOptions,
   StartMemorySearchSpanOptions,
   EndMemorySearchSpanOptions,
   StartMemoryAddSpanOptions,
@@ -649,6 +651,45 @@ export class Tracer {
       this._endSpan(span, attributes, options.error)
     } catch (err) {
       logger.warn(`error=<${err}> | failed to end node span`)
+    }
+  }
+
+  /**
+   * Start a System One decision span, parented to the current active span.
+   *
+   * Records the model and the question ids and kinds; state and instructions are never recorded.
+   *
+   * @param options - Options for starting the decision span
+   */
+  startDecisionSpan(options: StartDecisionSpanOptions): Span | null {
+    try {
+      const attributes = this._getCommonAttributes('decision')
+      attributes['strands.source'] = 'decision'
+      attributes['gen_ai.request.model'] = options.modelId
+      attributes['strands.decision.questions'] = options.questions
+      return this._startSpan({ name: 'decision', attributes, spanKind: SpanKind.INTERNAL })
+    } catch (error) {
+      logger.warn(`error=<${error}> | failed to start decision span`)
+      return null
+    }
+  }
+
+  /**
+   * End a System One decision span with its answers and usage.
+   *
+   * @param span - The span to end, or null if span creation failed
+   * @param options - Options for ending the decision span
+   */
+  endDecisionSpan(span: Span | null, options: EndDecisionSpanOptions = {}): void {
+    if (!span) return
+    try {
+      const attributes: Record<string, AttributeValue> = {}
+      if (options.usage) this._setUsageAttributes(attributes, options.usage)
+      if (options.responseModelId) attributes['gen_ai.response.model'] = options.responseModelId
+      if (options.answers) attributes['strands.decision.answers'] = options.answers
+      this._endSpan(span, attributes, options.error)
+    } catch (err) {
+      logger.warn(`error=<${err}> | failed to end decision span`)
     }
   }
 
