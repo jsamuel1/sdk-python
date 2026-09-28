@@ -1,6 +1,18 @@
 import { z } from 'zod'
-import { Agent, BedrockModel, ModelRouter, RoutingCandidate } from '@strands-agents/sdk'
-import { DecisionStrategy, choice, score, yesNo } from '@strands-agents/sdk/experimental'
+import {
+  Agent,
+  BedrockModel,
+  ModelRouter,
+  RoutingCandidate,
+  Swarm,
+} from '@strands-agents/sdk'
+import {
+  DecisionHandoffStrategy,
+  DecisionStrategy,
+  choice,
+  score,
+  yesNo,
+} from '@strands-agents/sdk/experimental'
 import { TypeSafeDecisionModel } from '@strands-agents/sdk/models/typesafe'
 
 async function firstQuestion(): Promise<void> {
@@ -49,5 +61,23 @@ function modelSelection(): Agent {
   return agent
 }
 
+async function swarmHandoff(): Promise<void> {
+  // --8<-- [start:swarm_handoff]
+  const swarm = new Swarm({
+    nodes: [
+      new Agent({ id: 'triage', systemPrompt: "You summarise the customer's problem." }),
+      new Agent({ id: 'billing', description: 'Charges, invoices, refunds' }),
+      new Agent({ id: 'technical', description: 'Bugs, outages, errors' }),
+    ],
+    handoffStrategy: new DecisionHandoffStrategy(new TypeSafeDecisionModel(), {
+      minConfidence: 0.7,
+    }),
+  })
+  const result = await swarm.invoke('The export button throws a 500')
+  // --8<-- [end:swarm_handoff]
+  void result
+}
+
 void firstQuestion
 void modelSelection
+void swarmHandoff

@@ -136,10 +136,27 @@ export class DecisionStrategy implements RoutingStrategy {
 }
 
 function evidence(candidate: RoutingCandidate): string | null {
+  return candidateEvidence(candidate.name, candidate.description, candidate.metadata)
+}
+
+/**
+ * Render a candidate's evidence as the `Choice` option description every decision adapter sends.
+ *
+ * @param name - Candidate name
+ * @param description - Candidate description
+ * @param metadata - Candidate metadata
+ * @returns JSON evidence, or null when there is none
+ * @internal
+ */
+export function candidateEvidence(
+  name: string | undefined,
+  description: string | undefined,
+  metadata?: Readonly<Record<string, unknown>>
+): string | null {
   const fields = {
-    ...(candidate.name && { name: candidate.name }),
-    ...(candidate.description && { description: candidate.description }),
-    ...(candidate.metadata && Object.keys(candidate.metadata).length > 0 && { metadata: candidate.metadata }),
+    ...(name && { name }),
+    ...(description && { description }),
+    ...(metadata && Object.keys(metadata).length > 0 && { metadata }),
   }
   return Object.keys(fields).length > 0 ? JSON.stringify(fields) : null
 }

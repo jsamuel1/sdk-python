@@ -12,11 +12,15 @@ sourceLinks:
   - path: strands-py/src/strands/experimental/decisions/_logprobs.py
   - path: strands-py/src/strands/experimental/decisions/_guard.py
   - path: strands-py/src/strands/experimental/decisions/_tool.py
+  - path: strands-py/src/strands/experimental/decisions/_handoff.py
+  - path: strands-py/src/strands/multiagent/swarm.py
   - path: strands-py/src/strands/models/typesafe.py
   - path: strands-py/src/strands/models/sagemaker_decision.py
   - path: strands-ts/src/experimental/decisions/decision-model.ts
   - path: strands-ts/src/experimental/decisions/schema.ts
   - path: strands-ts/src/experimental/decisions/decision-strategy.ts
+  - path: strands-ts/src/experimental/decisions/decision-handoff-strategy.ts
+  - path: strands-ts/src/multiagent/swarm.ts
   - path: strands-ts/src/models/typesafe.ts
   - path: site/docs/examples/python/system_one/support_triage.py
   - path: site/docs/examples/python/system_one/mixture_of_models.py
@@ -327,6 +331,7 @@ unsure. The more a decision must always happen, the further up this table it bel
 |---|---|---|---|
 | Front door | `DecisionAgent(routes=..., fallback=...)` | Your code, on every request | Hands off to a reasoning agent |
 | Subagent or graph node | `DecisionAgent` plus `when_choice` edges, or `DecisionStrategy` | The workflow | Follows a `when_below` edge, or the router default |
+| Swarm handoff | `Swarm(handoff_strategy=DecisionHandoffStrategy(...))` | The swarm, when an agent does not hand off itself | Completes, or re-runs the agent (`fallback`) |
 | Embedded guard | `DecisionGuard`, `decision_classifier` | Every tool call | Asks a person to confirm |
 | Tool | `decision_tool` | The LLM, mid-task | Probabilities go back to the LLM |
 
@@ -396,6 +401,54 @@ options already include `none` is rejected when it is compiled. Rename the optio
 `| None` and keep `none` as an ordinary option. The support-triage sample also
 sends a confident `"none"` and any multi-issue message (`when_yes("router",
 "multi_issue")`) to `general`.
+
+### Swarm handoff: route when an agent does not
+
+In a `Swarm`, an agent hands off by calling `handoff_to_agent` (Python) or by naming an
+`agentId` in its structured output (TypeScript). An agent that does neither completes the
+swarm. With `handoff_strategy`, a decision model makes that call instead: one `Choice` over
+the other agents plus `complete`, with each agent's name and description as evidence. An
+agent that hands off itself is never second-guessed.
+
+<Tabs>
+  <Tab label="Python">
+```python
+from strands import Agent
+from strands.experimental.decisions import DecisionHandoffStrategy
+from strands.models import TypeSafeDecisionModel
+from strands.multiagent import Swarm
+
+swarm = Swarm(
+    [
+        Agent(name="triage", system_prompt="You summarise the customer's problem."),
+        Agent(name="billing", description="Charges, invoices, refunds", system_prompt="..."),
+        Agent(name="technical", description="Bugs, outages, errors", system_prompt="..."),
+    ],
+    handoff_strategy=DecisionHandoffStrategy(TypeSafeDecisionModel(), min_confidence=0.7),
+)
+result = swarm("The export button throws a 500")
+decision = result.results["triage"].result.state["decision"]  # DECISION_STATE_KEY
+```
+  </Tab>
+  <Tab label="TypeScript">
+```typescript
+--8<-- "user-guide/sdk/experimental/decision-models_imports.ts:swarm_handoff_imports"
+
+--8<-- "user-guide/sdk/experimental/decision-models.ts:swarm_handoff"
+```
+  </Tab>
+</Tabs>
+
+The strategy's handoff takes the same path as the agent's own, so `max_handoffs`,
+`max_iterations` (`maxSteps` in TypeScript), repetitive-handoff detection, and session
+resume all apply. The handoff message carries the previous agent's final response, bounded
+by `max_response_tokens`. Below `min_confidence`, or when the decision fails, `fallback`
+applies: `"complete"` (the default) ends the swarm, as it would without a strategy, and
+`"stay"` re-runs the agent with a note that routing was unsure. A re-run counts as a handoff.
+
+Python records the decision on the node's result at `state["decision"]`. TypeScript records
+each node's latest decision as JSON on the swarm's `state.app` under `"decision"`, keyed by
+node id, so it is saved with the session. A node id of `complete` is reserved.
 
 ### Model selection: pick the tier per request
 
@@ -574,7 +627,7 @@ the same cases.
 
 | Sample | Use case | Placements |
 |---|---|---|
-| `support_triage.py` | Multi-agent routing and handoff | Front door, graph node |
+| `support_triage.py` | Multi-agent routing and handoff | Front door, graph node, swarm handoff (`--swarm`) |
 | `mixture_of_models.py` | Model selection | Embedded strategy |
 | `browser_next_action.py` | Browser use: next element, goal reached | Front door with escalation |
 | `guardrails.py` | Tool-call guard and citation check | Embedded guard, tool |

@@ -113,13 +113,12 @@ class DecisionStrategy:
 
 
 def _evidence(candidate: RoutingCandidate) -> str | None:
+    return candidate_evidence(candidate.name, candidate.description, candidate.metadata)
+
+
+def candidate_evidence(name: str | None, description: str | None, metadata: Any = None) -> str | None:
+    """Render a candidate's evidence as the ``Choice`` option description every decision adapter sends."""
     evidence = {
-        key: value
-        for key, value in (
-            ("name", candidate.name),
-            ("description", candidate.description),
-            ("metadata", candidate.metadata),
-        )
-        if value
+        key: value for key, value in (("name", name), ("description", description), ("metadata", metadata)) if value
     }
     return json.dumps(evidence, ensure_ascii=False, default=str) if evidence else None

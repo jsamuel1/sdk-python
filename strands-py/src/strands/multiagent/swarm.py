@@ -19,9 +19,9 @@ import json
 import logging
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, Protocol, cast
 
 from opentelemetry import trace as trace_api
 
@@ -235,6 +235,52 @@ class SwarmState:
         return True, "Continuing"
 
 
+@dataclass(frozen=True)
+class HandoffContext:
+    """What a ``HandoffStrategy`` sees after a node finished without handing off.
+
+    Attributes:
+        current: The node that just ran.
+        candidates: Every other node, in declaration order.
+        result: The node's result.
+        history: Nodes that have run so far, including ``current``.
+        shared_context: Context shared between nodes, keyed by node id.
+    """
+
+    current: SwarmNode
+    candidates: Sequence[SwarmNode]
+    result: NodeResult
+    history: Sequence[SwarmNode]
+    shared_context: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class Handoff:
+    """A handoff chosen by a ``HandoffStrategy``.
+
+    Attributes:
+        node: The node to run next, or None to complete the swarm. ``current`` re-runs the node.
+        message: The handoff message the next node receives.
+        context: Shared context to record for the current node, as ``handoff_to_agent``'s ``context`` is.
+    """
+
+    node: SwarmNode | None
+    message: str = ""
+    context: Mapping[str, Any] | None = None
+
+
+class HandoffStrategy(Protocol):
+    """Decides the next node when a node finishes without calling ``handoff_to_agent``.
+
+    An explicit ``handoff_to_agent`` call always wins; the strategy only runs when there is none. Its handoff goes
+    through the same path as the tool's, so handoff limits, repetitive-handoff detection, and checkpoints apply.
+    """
+
+    async def select(self, context: HandoffContext) -> Handoff | None:
+        """Return the handoff to apply, or None to complete the swarm."""
+        ...
+
+
 @dataclass
 class SwarmResult(MultiAgentResult):
     """Result from swarm execution - extends MultiAgentResult with swarm-specific details."""
@@ -282,6 +328,7 @@ class Swarm(MultiAgentBase):
         id: str = _DEFAULT_SWARM_ID,
         trace_attributes: Mapping[str, AttributeValue] | None = None,
         plugins: list[MultiAgentPlugin] | None = None,
+        handoff_strategy: HandoffStrategy | None = None,
     ) -> None:
         """Initialize Swarm with agents and configuration.
 
@@ -301,6 +348,8 @@ class Swarm(MultiAgentBase):
             hooks: List of hook providers for monitoring and extending graph execution behavior (default: None)
             trace_attributes: Custom trace attributes to apply to the agent's trace span (default: None)
             plugins: List of multi-agent plugins for extending swarm behavior (default: None)
+            handoff_strategy: Chooses the next node when a node finishes without calling ``handoff_to_agent``.
+                Without one, such a node completes the swarm (default: None)
         """
         super().__init__()
         self.id = id
@@ -311,6 +360,7 @@ class Swarm(MultiAgentBase):
         self.node_timeout = node_timeout
         self.repetitive_handoff_detection_window = repetitive_handoff_detection_window
         self.repetitive_handoff_min_unique_agents = repetitive_handoff_min_unique_agents
+        self.handoff_strategy = handoff_strategy
 
         self.shared_context = SharedContext()
         self.nodes: dict[str, SwarmNode] = {}
@@ -664,6 +714,32 @@ class Swarm(MultiAgentBase):
             target_node.node_id,
         )
 
+    async def _apply_handoff_strategy(self, node: SwarmNode, node_result: NodeResult) -> None:
+        """Ask the handoff strategy for the next node when a completed node did not hand off itself.
+
+        Raises:
+            ValueError: If the strategy returns a node that is not part of this swarm.
+        """
+        if self.handoff_strategy is None or self.state.handoff_node is not None:
+            return
+        if node_result.status != Status.COMPLETED:
+            return
+        context = HandoffContext(
+            current=node,
+            candidates=[candidate for candidate in self.nodes.values() if candidate is not node],
+            result=node_result,
+            history=list(self.state.node_history),
+            shared_context=copy.deepcopy(self.shared_context.context),
+        )
+        handoff = await self.handoff_strategy.select(context)
+        if handoff is None or handoff.node is None:
+            logger.debug("node=<%s> | handoff strategy completed the swarm", node.node_id)
+            return
+        if self.nodes.get(handoff.node.node_id) is not handoff.node:
+            raise ValueError(f"handoff strategy chose node '{handoff.node.node_id}', which is not in this swarm")
+        logger.debug("from_node=<%s>, to_node=<%s> | handoff strategy chose node", node.node_id, handoff.node.node_id)
+        self._handle_handoff(handoff.node, handoff.message, dict(handoff.context or {}))
+
     def _rollback_uncommitted_turn(self) -> None:
         """Undo the handoff state an uncommitted turn wrote, so a checkpoint cannot persist it.
 
@@ -868,6 +944,9 @@ class Swarm(MultiAgentBase):
                         self._turn.outcome = "committed"
                         yield interrupt_event
                         break
+
+                    # Before AfterNodeCallEvent, so the checkpoint it drives records the strategy's handoff.
+                    await self._apply_handoff_strategy(current_node, node_result)
 
                 except (asyncio.CancelledError, GeneratorExit):
                     self._rollback_uncommitted_turn()

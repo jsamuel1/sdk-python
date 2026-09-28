@@ -12,30 +12,47 @@ or multi-issue to a general reasoning agent. Placement (b), subagent: the same s
 Both placements use code stand-ins for the specialists and the fallback, so ``--engine jev`` needs only
 ``TYPESAFE_API_KEY``. In an app these are full agents with tools.
 
+Placement (c), ``--swarm``: a ``Swarm`` whose triage agent is an LLM (``--llm-model`` on Amazon Bedrock, so
+this arm also needs AWS credentials). It runs twice on the same tickets. In the LLM arm, the triage agent
+hands off by calling ``handoff_to_agent``, as swarms do today. In the decision arm, it only summarises the
+ticket and ``DecisionHandoffStrategy`` picks the team. The strategy also runs after each specialist, which
+should answer ``complete``, so the arm makes two decisions per ticket. Both arms report handoff accuracy,
+extra hops past the specialist, latency, and cost per 1,000 tickets (the triage agent's LLM tokens plus the
+decisions). The specialists are code stand-ins.
+
 Usage:
     python support_triage.py                # Jev (TYPESAFE_API_KEY)
     python support_triage.py --engine kev   # self-hosted Kev (--kev-url, default KEV_BASE_URL)
     python support_triage.py --engine llm   # same schema on an LLM (Amazon Bedrock)
+    python support_triage.py --swarm        # swarm handoff: LLM handoff_to_agent vs Jev (also needs AWS)
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
+import statistics
+import time
+from collections.abc import AsyncGenerator
 from typing import Annotated, Any, Literal
 
-from _common import Report, decision_model, distribution, parse_args
+from _common import Report, decision_model, distribution, parse_args, usd
+from strands import Agent
 from strands.agent.agent_result import AgentResult
 from strands.experimental.decisions import (
+    COMPLETE_OPTION,
     DECISION_STATE_KEY,
     Choice,
     DecisionAgent,
+    DecisionHandoffStrategy,
     DecisionSchema,
     YesNo,
     when_below,
     when_choice,
     when_yes,
 )
-from strands.multiagent import GraphBuilder
+from strands.models import BedrockModel, Model
+from strands.multiagent import GraphBuilder, Swarm
 
 SPECIALISTS = ("billing", "technical", "account")
 # Illustrative, not tuned: tune per engine on your own traffic.
@@ -171,9 +188,117 @@ async def graph_router(engine, report: Report) -> None:
         report.check(message[:48], [expected], ran, _describe(decision), errors_before=before)
 
 
+TEAMS = {
+    "billing": "Charges, invoices, refunds, payment methods",
+    "technical": "Bugs, outages, errors, integrations",
+    "account": "Login, passwords, MFA, profile settings",
+    "general": "Messages that raise more than one independent problem, or fit no other team",
+}
+TRIAGE_SUMMARISE = "You triage customer support messages. Restate the customer's problem in one sentence."
+TRIAGE_HANDOFF = (
+    f"{TRIAGE_SUMMARISE} Then call handoff_to_agent to pass the message to the team that should handle it: "
+    "billing, technical, or account, or general when the message raises more than one independent problem."
+)
+TRIAGE_NO_HANDOFF = f"{TRIAGE_SUMMARISE} Do not hand off; another system routes the message."
+
+
+class _TeamReply(Model):
+    """A Model that replies with the team's name: a code stand-in for a specialist agent (no LLM call)."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def get_config(self) -> Any:
+        return {"model_id": f"stand-in-{self.name}"}
+
+    def update_config(self, **config: Any) -> None:
+        pass
+
+    def structured_output(self, output_model: Any, prompt: Any, system_prompt: Any = None, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def stream(
+        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[Any, None]:
+        yield {"messageStart": {"role": "assistant"}}
+        yield {"contentBlockDelta": {"delta": {"text": self.name}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+
+def build_swarm(llm_model: str, strategy: DecisionHandoffStrategy | None) -> Swarm:
+    triage = Agent(
+        name="triage",
+        model=BedrockModel(model_id=llm_model),
+        system_prompt=TRIAGE_HANDOFF if strategy is None else TRIAGE_NO_HANDOFF,
+        callback_handler=None,
+    )
+    teams = [
+        Agent(name=name, description=description, model=_TeamReply(name), callback_handler=None)
+        for name, description in TEAMS.items()
+    ]
+    return Swarm([triage, *teams], handoff_strategy=strategy, max_handoffs=3, max_iterations=3)
+
+
+async def swarm_arm(label: str, swarm: Swarm, engine, llm_model: str) -> tuple[int, int]:
+    """Run every case through ``swarm``; return (decision requests that failed, cases the LLM routed itself)."""
+    correct, declined, llm_routed, extra_hops, latencies, cost = 0, 0, 0, 0, [], 0.0
+    errors_before, decisions_before, decision_cost_before = engine.errors, engine.decisions, engine.cost
+    print(f"\nswarm, {label}")
+    for message, expected in CASES:
+        started = time.perf_counter()
+        result = await swarm.invoke_async(message)
+        latencies.append(time.perf_counter() - started)
+        routed = result.node_history[1].node_id if len(result.node_history) > 1 else "triage"
+        triage = result.results["triage"]
+        cost += usd(llm_model, triage.accumulated_usage)
+        # A specialist that finishes is also asked where to go next; any hop past it is an extra handoff.
+        extra_hops += max(0, len(result.node_history) - 2)
+        decision = getattr(triage.result, "state", {}).get(DECISION_STATE_KEY)
+        detail = ""
+        if decision is not None:
+            answer = decision.answers["next"]
+            detail = f"confidence={answer.confidence} [{distribution(answer.probabilities)}]"
+            declined += routed == "triage" and decision.output.next != COMPLETE_OPTION
+        elif swarm.handoff_strategy is not None and routed != "triage":
+            llm_routed += 1
+            detail = "routed by the LLM's own handoff_to_agent call"
+        ok = routed == expected
+        correct += ok
+        print(f"  [{'ok' if ok else 'MISS'}] {message[:48]}: expected={expected!r} got={routed!r} {detail}")
+    cost += engine.cost - decision_cost_before
+    per_1k = "n/a (unpriced model)" if math.isnan(cost) else f"${1000 * cost / len(CASES):.3f} per 1k tickets"
+    print(
+        f"  {label}: {correct}/{len(CASES)} correct, {declined} declined, {extra_hops} extra hops, "
+        f"p50 {statistics.median(latencies):.2f}s / max {max(latencies):.2f}s per ticket, {per_1k} "
+        f"({engine.decisions - decisions_before} decisions)"
+    )
+    return engine.errors - errors_before, llm_routed
+
+
+async def swarm_arms(engine, args) -> None:
+    await swarm_arm("LLM handoff_to_agent", build_swarm(args.llm_model, None), engine, args.llm_model)
+    strategy = DecisionHandoffStrategy(engine, min_confidence=MIN_CONFIDENCE if engine.calibrated else None)
+    errors, llm_routed = await swarm_arm(
+        f"DecisionHandoffStrategy ({args.engine})", build_swarm(args.llm_model, strategy), engine, args.llm_model
+    )
+    if llm_routed:
+        print(f"  {llm_routed} ticket(s) were routed by the LLM despite its instructions; its own handoff wins.")
+    if errors:
+        print(f"  {errors} decision request(s) failed; see the errors above.")
+        raise SystemExit(1)
+
+
+def _swarm_flag(parser) -> None:
+    parser.add_argument("--swarm", action="store_true", help="compare swarm handoff arms (needs AWS credentials)")
+
+
 async def main() -> None:
-    args = parse_args(__doc__.splitlines()[1])
+    args = parse_args(__doc__.splitlines()[1], _swarm_flag)
     engine = decision_model(args)
+    if args.swarm:
+        await swarm_arms(engine, args)
+        return
     report = Report(args.engine, engine)
     if not engine.calibrated:
         print(

@@ -81,6 +81,52 @@ interface HandoffResult {
 }
 
 /**
+ * What a {@link HandoffStrategy} sees after a node finished without handing off.
+ */
+export interface HandoffContext {
+  /** The node that just ran. */
+  readonly current: AgentNode
+  /** Every other node, in declaration order. */
+  readonly candidates: readonly AgentNode[]
+  /** The input the node ran on. */
+  readonly input: MultiAgentInput
+  /** The node's result. */
+  readonly result: NodeResult
+  /** Ids of the nodes completed in this invocation, including `current`. */
+  readonly history: readonly string[]
+  /** The swarm's state. `state.app` is shared across nodes and persisted with the session. */
+  readonly state: MultiAgentState
+}
+
+/**
+ * A handoff chosen by a {@link HandoffStrategy}.
+ */
+export interface Handoff {
+  /** The node to run next, or undefined to complete the swarm. `current` re-runs the node. */
+  readonly node?: AgentNode
+  /** The next node's input: instructions for it, since it does not otherwise see the previous node's output. */
+  readonly message: string
+  /** Structured data passed alongside `message`, as a handoff's `context` is. */
+  readonly context?: Record<string, unknown>
+}
+
+/**
+ * Decides the next node when a node finishes without handing off in its structured output.
+ *
+ * A handoff the agent chose itself always wins; the strategy only runs when there is none. Its handoff is recorded
+ * as the node's structured output, so `maxSteps`, repetitive-handoff detection, and session resume apply unchanged.
+ */
+export interface HandoffStrategy {
+  /**
+   * Return the handoff to apply, or undefined to complete the swarm.
+   *
+   * @param context - The node that ran, the candidates, and the swarm state
+   * @returns The handoff, or undefined to complete
+   */
+  select(context: HandoffContext): Promise<Handoff | undefined>
+}
+
+/**
  * Input type for swarm nodes. Pass an {@link InvokableAgent} directly for the simple case,
  * or {@link AgentNodeOptions} for per-node config.
  */
@@ -99,6 +145,8 @@ export interface SwarmOptions extends SwarmConfig {
   plugins?: MultiAgentPlugin[]
   /** Custom trace attributes to include on all spans. */
   traceAttributes?: Record<string, AttributeValue>
+  /** Chooses the next node when a node finishes without handing off. Without one, such a node completes the swarm. */
+  handoffStrategy?: HandoffStrategy
 }
 
 /**
@@ -139,6 +187,7 @@ export class Swarm implements MultiAgent {
   private readonly _tracer: Tracer
   readonly start: AgentNode
   readonly sessionManager?: SessionManager | undefined
+  readonly handoffStrategy?: HandoffStrategy | undefined
   private _initialized: boolean
   /**
    * State retained across invocations when a run ends INTERRUPTED. Lets
@@ -149,7 +198,7 @@ export class Swarm implements MultiAgent {
   private _pendingInterruptState?: MultiAgentState
 
   constructor(options: SwarmOptions) {
-    const { id, nodes, start, sessionManager, plugins, traceAttributes, ...config } = options
+    const { id, nodes, start, sessionManager, plugins, traceAttributes, handoffStrategy, ...config } = options
 
     this.id = id ?? 'swarm'
 
@@ -171,6 +220,7 @@ export class Swarm implements MultiAgent {
     this.start = this._resolveStart(start)
 
     this.sessionManager = sessionManager
+    this.handoffStrategy = handoffStrategy
 
     if (sessionManager && plugins?.some((p) => p.name === sessionManager.name)) {
       throw new Error('sessionManager was provided as both a constructor argument and in the plugins array')
@@ -364,7 +414,8 @@ export class Swarm implements MultiAgent {
           handoff,
           multiAgentSpan,
           invocationState,
-          nodeCancelSignal
+          nodeCancelSignal,
+          invocationNodeHistory
         )
         nextInput = input
         handoff = nodeResult.structuredOutput as HandoffResult | undefined
@@ -436,7 +487,8 @@ export class Swarm implements MultiAgent {
     handoff: HandoffResult | undefined,
     multiAgentSpan: Span | null,
     invocationState: InvocationState,
-    executionSignal?: AbortSignal
+    executionSignal?: AbortSignal,
+    history: readonly string[] = []
   ): AsyncGenerator<MultiAgentStreamEvent, NodeResult, undefined> {
     const nodeState = state.node(node.id)!
     const handoffSchema = this._buildHandoffSchema(node.id)
@@ -507,7 +559,8 @@ export class Swarm implements MultiAgent {
         )
       }
 
-      const result = next.value
+      // Before AfterNodeCallEvent, so the checkpoint it drives records the strategy's handoff.
+      const result = await this._applyHandoffStrategy(node, nodeInput, next.value, state, history)
       this._tracer.endNodeSpan(nodeSpan, { status: result.status, duration: result.duration, usage: result.usage })
       state.results.push(result)
 
@@ -524,6 +577,55 @@ export class Swarm implements MultiAgent {
     } finally {
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
     }
+  }
+
+  /**
+   * Ask the handoff strategy for the next node when a completed node did not hand off itself, and record its
+   * handoff as the node's structured output.
+   *
+   * @returns The node's result, carrying the strategy's handoff when it chose one
+   * @throws Error if the strategy returns a node that is not part of this swarm
+   */
+  private async _applyHandoffStrategy(
+    node: AgentNode,
+    input: MultiAgentInput,
+    result: NodeResult,
+    state: MultiAgentState,
+    history: readonly string[]
+  ): Promise<NodeResult> {
+    if (!this.handoffStrategy || result.status !== Status.COMPLETED) return result
+    if ((result.structuredOutput as HandoffResult | undefined)?.agentId) return result
+    const handoff = await this.handoffStrategy.select({
+      current: node,
+      candidates: [...this.nodes.values()].filter((candidate) => candidate !== node),
+      input,
+      result,
+      history: [...history, node.id],
+      state,
+    })
+    if (!handoff?.node) {
+      logger.debug(`node_id=<${node.id}> | handoff strategy completed the swarm`)
+      return result
+    }
+    if (this.nodes.get(handoff.node.id) !== handoff.node) {
+      throw new Error(`node_id=<${handoff.node.id}> | handoff strategy chose a node that is not in this swarm`)
+    }
+    logger.debug(`source=<${node.id}>, target=<${handoff.node.id}> | handoff strategy chose node`)
+    const routed = new NodeResult({
+      nodeId: result.nodeId,
+      status: result.status,
+      duration: result.duration,
+      content: result.content,
+      structuredOutput: {
+        agentId: handoff.node.id,
+        message: handoff.message,
+        ...(handoff.context && { context: handoff.context }),
+      } satisfies HandoffResult,
+      ...(result.usage && { usage: result.usage }),
+    })
+    const nodeResults = state.node(node.id)!.results
+    nodeResults[nodeResults.length - 1] = routed
+    return routed
   }
 
   private _validateConfig(): void {

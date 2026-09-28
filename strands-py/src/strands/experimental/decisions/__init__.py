@@ -11,6 +11,7 @@ from ._agent import DECISION_STATE_KEY, DecisionAgent
 from ._fit import TemperatureFit, fit_temperature
 from ._graph import DecisionEdgeCondition, when_below, when_choice, when_yes
 from ._guard import DecisionGuard, GuardPolicy, decision_classifier
+from ._handoff import COMPLETE_OPTION, DecisionHandoffStrategy, HandoffDecision
 from ._llm import LLMDecisionModel
 from ._model import DecisionModel
 from ._schema import CompiledSchema, DecisionSchema, compile_schema
@@ -33,6 +34,7 @@ from ._types import (
 )
 
 __all__ = [
+    "COMPLETE_OPTION",
     "DECISION_STATE_KEY",
     "Answer",
     "Choice",
@@ -42,6 +44,7 @@ __all__ = [
     "DecisionAgent",
     "DecisionEdgeCondition",
     "DecisionGuard",
+    "DecisionHandoffStrategy",
     "DecisionModel",
     "DecisionResponse",
     "DecisionSchema",
@@ -49,6 +52,7 @@ __all__ = [
     "DecisionStrategy",
     "DecisionTool",
     "GuardPolicy",
+    "HandoffDecision",
     "LLMDecisionModel",
     "Question",
     "Score",

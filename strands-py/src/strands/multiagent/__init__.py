@@ -10,13 +10,16 @@ Submodules:
 
 from .base import MultiAgentBase, MultiAgentResult, Status
 from .graph import EdgeCondition, EdgeConditionWithContext, GraphBuilder, GraphResult
-from .swarm import Swarm, SwarmResult
+from .swarm import Handoff, HandoffContext, HandoffStrategy, Swarm, SwarmResult
 
 __all__ = [
     "EdgeCondition",
     "EdgeConditionWithContext",
     "GraphBuilder",
     "GraphResult",
+    "Handoff",
+    "HandoffContext",
+    "HandoffStrategy",
     "MultiAgentBase",
     "MultiAgentResult",
     "Status",
