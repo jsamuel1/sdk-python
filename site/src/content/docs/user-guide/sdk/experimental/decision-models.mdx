@@ -38,9 +38,11 @@ comes with an honest "I'm not sure".
 model and the first provider. Any other decision model implements the same interface.
 
 :::note[TypeScript coverage]
-TypeScript has `DecisionModel`, the Zod schema helpers, `TypeSafeDecisionModel`, and
-`DecisionStrategy`. `LLMDecisionModel`, `DecisionAgent`, the graph helpers,
-`DecisionGuard`, and `decision_tool` are Python-only for now.
+TypeScript has `DecisionModel` (with `answerFromLogits`), the Zod schema helpers,
+`TypeSafeDecisionModel` (with `temperature` and `calibrated`), and `DecisionStrategy`.
+`LLMDecisionModel`, `SageMakerDecisionModel`, `DecisionAgent`, the graph helpers,
+`DecisionGuard`, `decision_tool`, and the raw `logits`/`extras` span attributes are
+Python-only for now.
 :::
 
 ## Install and ask a first question
@@ -133,16 +135,39 @@ vendor or a model family, and `calibrated` tells you whether this instance's con
 be trusted. Adapters that gate on confidence (`min_confidence=`) refuse an instance that is
 not calibrated.
 
-`TypeSafeDecisionModel` is calibrated as shipped: `temperature=1.0` and `calibrated=True`
-are the defaults, and 1.0 passes the server's probabilities through unchanged. Pass a
+`TypeSafeDecisionModel` is calibrated as shipped: a `temperature` of 1.0 and
+`calibrated` set to true are the defaults, and 1.0 passes the server's probabilities through unchanged. Pass a
 temperature you fitted for your domain, or for a server that returns raw probabilities, and
 the SDK rescales on the client (`softmax(log p / T)`). It then recomputes each confidence,
-and keeps the server's original numbers on `answer.extras`. `calibrated=False` records that
-no temperature has been fitted: every `confidence` is then `None`.
+and keeps the server's original numbers on `answer.extras`. Setting `calibrated` to false
+records that no temperature has been fitted: every `confidence` is then
+<Syntax py="None" ts="undefined" />.
 
 Where a provider has no confidence of its own, Choice and Score use the probability of the
-winning option (`max_probability_confidence`) and YesNo uses `|2p - 1|`
-(`yes_no_confidence`). Every answer also carries the provider's raw scores when it exposes
+winning option
+(<Syntax py="max_probability_confidence" ts="maxProbabilityConfidence" />) and YesNo
+uses `|2p - 1|` (<Syntax py="yes_no_confidence" ts="yesNoConfidence" />). A provider
+that returns raw logits builds its answers with
+<Syntax py="DecisionModel.answer_from_logits" ts="DecisionModel.answerFromLogits" />,
+so no provider reimplements temperature scaling.
+
+Fit a temperature once, offline, on 100 to 200 labelled examples, and paste the number into
+configuration. `fit_temperature` (Python) minimises negative log-likelihood over one scalar
+temperature and reports expected calibration error before and after:
+
+```python
+from strands.experimental.decisions import fit_temperature
+
+examples = [({"ticket": "Billed twice"}, Triage(department="billing", urgent=True,
+             frustration=1.0)), ...]          # (state, expected); partial dicts also work
+fit = await fit_temperature(kev, Triage, examples)
+print(fit)   # TemperatureFit(<T>, ece <before> -> <after>, nll ..., pairs=...)
+kev = TypeSafeDecisionModel(base_url=KEV_URL, temperature=float(fit))
+```
+
+It fits on the answer's `logits` when the provider returns them, and on log-probabilities
+otherwise, and it returns the absolute temperature to configure. Use one instance per
+domain: two domains on one backend are two instances with two fitted temperatures. Every answer also carries the provider's raw scores when it exposes
 them: `logits` (pre-softmax, pre-temperature, keyed like `probabilities`) and `extras`
 (other native fields, verbatim). Both are included in `decision_tool` results and decision
 spans when present. The `/v1/systemone` API returns probabilities, not logits, so on Jev and

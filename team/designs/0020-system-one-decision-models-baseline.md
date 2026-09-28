@@ -227,7 +227,11 @@ KEV_BASE_URL=http://127.0.0.1:8010 python bench.py --tasks all --arms kev   # an
 python analyze.py --tasks all --arms kev=kev,jev=jev,luna=global.openai.gpt-6-luna,haiku=us.anthropic.claude-haiku-4-5-20251001-v1:0
 python cascade.py --fast kev --out cascade-kev.json
 python cascade.py --fast kev --slow global.openai.gpt-6-luna --out cascade-kev-luna.json
+LOGIT_BASE_URL=http://127.0.0.1:8010/v1/logits LOGIT_TEMPERATURE=1.7 \
+  python bench.py --tasks all --arms logit     # any generic HTTP logit server
 ```
+
+The `logit` arm puts a local logit model in the same results table as Jev, Kev and the LLMs. It needs no `/v1/systemone` server. For each question it POSTs `{"instruction", "text", "labels"}` (YesNo sends `["true", "false"]`) and reads back `{"logits": {label: float}}`, plus an optional `"model"`. Probabilities are `softmax(logits / LOGIT_TEMPERATURE)`. A raw-logit model is uncalibrated until a temperature is fitted (see `fit_temperature`), so the arm reports confidence, and a selective-accuracy curve, only when `LOGIT_TEMPERATURE` is set. It sends one request per question, so its latency is the slowest question in a multi-question task, not one call. No logit model has been run through it yet; a contributed logit provider is the first planned arm.
 
 `analyze.py --arms short=id,...` and `cascade.py --fast <id> --slow <id>` take the same arm ids as `bench.py --arms`, so any other arm runs through the same analysis. Accuracy counts an errored item (an API or parse failure) as incorrect. Latency, tokens and cost are computed over non-errored items. Every arm's `errors` count is in the summary. In the published runs it is 0 for every arm and task, so no reported accuracy includes an error.
 

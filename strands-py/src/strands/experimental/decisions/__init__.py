@@ -8,6 +8,7 @@ Experimental: subject to change without notice. See ``team/designs/0020-system-o
 
 from ...models._request_text import project_state
 from ._agent import DECISION_STATE_KEY, DecisionAgent
+from ._fit import TemperatureFit, fit_temperature
 from ._graph import DecisionEdgeCondition, when_below, when_choice, when_yes
 from ._guard import DecisionGuard, GuardPolicy, decision_classifier
 from ._llm import LLMDecisionModel
@@ -51,11 +52,13 @@ __all__ = [
     "Question",
     "Score",
     "ScoreAnswer",
+    "TemperatureFit",
     "YesNo",
     "YesNoAnswer",
     "compile_schema",
     "decision_classifier",
     "decision_tool",
+    "fit_temperature",
     "max_probability_confidence",
     "project_state",
     "when_below",

@@ -3,6 +3,10 @@
 Arms:
   jev          TypeSafe /v1/systemone, jev-latest
   kev          A self-hosted Kev server at KEV_BASE_URL (same /v1/systemone API), kev-latest
+  logit        Any generic HTTP logit server at LOGIT_BASE_URL: POST {instruction, text, labels} and get
+               {"logits": {label: float}} back, one request per question. Probabilities are
+               softmax(logits / LOGIT_TEMPERATURE); confidence is reported only when LOGIT_TEMPERATURE is set
+               (a raw-logit model is uncalibrated until a temperature is fitted; see fit_temperature).
   <bedrock id> Bedrock Converse with a forced tool whose schema is the same closed answer space
                (enum for Choice, boolean for YesNo), temperature 0 (gpt-6-luna: reasoning effort none; it rejects
                temperature). A multi-question task gets one tool field per question, in one call.
@@ -32,6 +36,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import pathlib
 import statistics
@@ -47,7 +52,7 @@ RESULTS = HERE / "results"
 # docs.typesafe.ai/models (Jev: input only, output free). Retrieved 2026-09-24.
 # gpt-6-luna has no AWS Pricing API rows yet; its price is OpenAI's short-context Standard rate, which OpenAI states
 # Bedrock matches in commercial regions (developers.openai.com/api/docs/pricing, retrieved 2026-09-26). A self-hosted
-# Kev has no per-token price: its cost is instance time, so it reports NaN.
+# Kev (or a generic logit server) has no per-token price: its cost is instance time, so it reports NaN.
 PRICES = {
     "jev": (0.042, 0.0),
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
@@ -227,6 +232,80 @@ class SystemOneArm:
             "in": out["usage"]["input_tokens"] or 0,
             "out": out["usage"]["output_tokens"] or 0,
             "model": out["model"],
+        }
+
+
+class HttpLogitArm:
+    """A generic logit server: instruction, text and labels in, one logit per label out.
+
+    The request body is ``{"instruction": str, "text": str, "labels": [str, ...]}`` (YesNo sends
+    ``["true", "false"]``); the response is ``{"logits": {label: float}}`` and may add ``"model"``. The endpoint is
+    ``LOGIT_BASE_URL`` (default ``http://127.0.0.1:8010/v1/logits``) with an optional ``LOGIT_API_KEY`` bearer token.
+    """
+
+    name = "logit"
+
+    def __init__(self):
+        self.url = os.environ.get("LOGIT_BASE_URL", "http://127.0.0.1:8010/v1/logits")
+        self._key = os.environ.get("LOGIT_API_KEY")
+        raw_t = os.environ.get("LOGIT_TEMPERATURE")
+        self.temperature = float(raw_t) if raw_t else None
+        if self.temperature is not None and not (self.temperature > 0 and math.isfinite(self.temperature)):
+            raise ValueError(f"LOGIT_TEMPERATURE must be a finite number above 0, got {raw_t!r}")
+
+    @staticmethod
+    def _labels(q: dict) -> list[str]:
+        return list(q["criteria"]) if q["type"] == "choice" else ["true", "false"]
+
+    @staticmethod
+    def _instruction(q: dict) -> str:
+        # The same content Jev and the LLM arms receive: instructions plus option descriptions.
+        return BedrockArm._question_text(q)
+
+    def _post(self, body: dict) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self._key:
+            headers["Authorization"] = f"Bearer {self._key}"
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.load(r)
+
+    def answer(self, q: dict, logits: dict) -> tuple[object, float | None, dict]:
+        """Map one question's logits to (prediction, confidence, probabilities) at the configured temperature."""
+        labels = self._labels(q)
+        if set(logits) != set(labels):
+            raise ValueError(f"logit server returned labels {sorted(logits)}, expected {sorted(labels)}")
+        t = self.temperature or 1.0
+        top = max(logits.values())
+        weights = {lab: math.exp((v - top) / t) for lab, v in logits.items()}
+        total = sum(weights.values())
+        probs = {lab: w / total for lab, w in weights.items()}
+        if q["type"] == "choice":
+            pred = max(probs, key=probs.__getitem__)
+            conf = probs[pred]
+        else:
+            pred = probs["true"] >= 0.5
+            conf = abs(2 * probs["true"] - 1)
+        return pred, (conf if self.temperature is not None else None), probs
+
+    async def ask(self, text: str, questions: dict) -> dict:
+        bodies = {
+            qid: {"instruction": self._instruction(q), "text": text, "labels": self._labels(q)}
+            for qid, q in questions.items()
+        }
+        t = time.perf_counter()
+        outs = await asyncio.gather(*(asyncio.to_thread(self._post, body) for body in bodies.values()))
+        lat = time.perf_counter() - t
+        by_q = dict(zip(questions, outs, strict=True))
+        mapped = {qid: self.answer(q, by_q[qid]["logits"]) for qid, q in questions.items()}
+        return {
+            "preds": {qid: m[0] for qid, m in mapped.items()},
+            "confs": {qid: m[1] for qid, m in mapped.items()},
+            "raw": {qid: {"logits": by_q[qid]["logits"], "probabilities": mapped[qid][2]} for qid in questions},
+            "lat": lat,
+            "in": 0,
+            "out": 0,
+            "model": next((o.get("model") for o in outs if o.get("model")), self.url),
         }
 
 
@@ -414,7 +493,11 @@ def summarize(arm: str, task: str, rows: list[dict], wall_s: float = float("nan"
 
 
 def make_arm(name: str, profile: str, region: str):
-    return SystemOneArm(name) if name in ("jev", "kev") else BedrockArm(name, profile, region)
+    if name in ("jev", "kev"):
+        return SystemOneArm(name)
+    if name == "logit":
+        return HttpLogitArm()
+    return BedrockArm(name, profile, region)
 
 
 async def main():
