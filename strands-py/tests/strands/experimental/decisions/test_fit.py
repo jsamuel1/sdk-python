@@ -131,6 +131,15 @@ async def test_partial_labels_enum_none_and_score_levels(caplog):
 
 
 @pytest.mark.asyncio
+async def test_schema_instance_labels_accept_float_score_level():
+    logits = {"a": {"dept": {"billing": 2.0, "technical": 0.0, "none": 0.0}, "anger": {0: 0.0, 1: 2.0, 2: 0.0}}}
+
+    fit = await fit_temperature(_LogitModel(logits), Ticket, [("a", Ticket(dept=Dept.BILLING, anger=1.0))])
+
+    assert fit.pairs == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("expected", "message"),
     [

@@ -185,7 +185,9 @@ def _choice_label(name: str, question: Choice, value: Any) -> str:
 
 def _score_label(name: str, question: Score, value: Any) -> int:
     levels = len(question.levels)
-    is_index = isinstance(value, int) and not isinstance(value, bool) and 0 <= value < levels
+    # A Score field is typed float, so a schema instance dumps its level index as e.g. 1.0.
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    is_index = is_number and float(value).is_integer() and 0 <= value < levels
     if not is_index:
         raise ValueError(f"{name}: a score label must be a level index from 0 to {levels - 1}, got {value!r}")
     return int(value)
