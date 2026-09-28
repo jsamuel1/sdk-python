@@ -2,7 +2,7 @@
 
 **Status**: Measured
 
-**Date**: 2026-09-24; rerun 2026-09-27 with GPT-6 Luna and multi-decision tasks
+**Date**: 2026-09-24; rerun 2026-09-27 with GPT-6 Luna and multi-decision tasks; self-hosted Kev-27B added 2026-09-28
 
 **Design**: [0020 System One Decision Models](./0020-system-one-decision-models.md)
 
@@ -30,7 +30,7 @@ Three arms answer **identical questions**: the same instructions and the same op
 - **Jev** (`jev-latest`, which answered as `jev-1.13.0`) through `POST /v1/systemone`. All questions for an input go in one request.
 - **GPT-6 Luna** (`global.openai.gpt-6-luna`, reasoning effort `none`, its fast mode; it rejects `temperature`) and **Claude Haiku 4.5** (temperature 0) on Amazon Bedrock (`us-west-2`), through Converse with a forced tool whose input schema is the closed answer space: an enum for Choice, a boolean for YesNo, one required field per question. A multi task is one tool call, so the LLM also answers every question for an input in one request. This is the strongest fair LLM framing: the model cannot answer outside the options and emits only a few output tokens.
 
-The first run (2026-09-24) used **Amazon Nova Micro** as the cheap LLM. Review asked for a current fast LLM, so GPT-6 Luna replaces it here. Nova Micro was rerun with the others and is kept in [History](#history-nova-micro-and-the-first-run). A self-hosted **Kev** arm (`bench.py --arms kev`, any `/v1/systemone` server at `KEV_BASE_URL`) is supported by the harness but not reported yet: see [Not measured here](#what-this-supports-and-what-it-does-not).
+The first run (2026-09-24) used **Amazon Nova Micro** as the cheap LLM. Review asked for a current fast LLM, so GPT-6 Luna replaces it here. Nova Micro was rerun with the others and is kept in [History](#history-nova-micro-and-the-first-run). A fourth arm, the open-weights **Kev-27B**, was self-hosted and run on the same items on 2026-09-28. It is reported separately in [Self-hosted: Kev-27B](#self-hosted-kev-27b), because it ran from a different host on a different day.
 
 All arms ran on 2026-09-27 from one host in `us-west-2`, one after another, so latencies are like for like and include network time. Samples are seeded (`4551`) and one request is made per item at concurrency 4.
 
@@ -148,6 +148,38 @@ Nova Micro cost about the same as Jev and was 16 to 26 points less accurate on r
 
 The first run's Jev latency was 0.50–0.52 s p50 on every task. It was measured from a different host. On 2026-09-27 the same Jev requests took 0.22–0.23 s from a `us-west-2` host, with the same answers on 195–199 of 200 items, so the difference is most likely the client's network path. Jev reports no server timing that would separate the two. The first run's summaries are kept as [`results-summary-2026-09-24.json`](./0020-system-one-decision-models/results-summary-2026-09-24.json) and [`results-cascade-2026-09-24.json`](./0020-system-one-decision-models/results-cascade-2026-09-24.json).
 
+## Self-hosted: Kev-27B
+
+[Kev](https://github.com/jaredpalmer/kev) (Apache-2.0) is an open-weights System One model: a LoRA adapter and pointer head (adapter rev `01b81998`) on Qwen3.8-27B (rev `1d4bf0f2`), with a fitted temperature of 1.38. It serves the same `/v1/systemone` API as Jev, so `bench.py --arms kev` sends it byte-identical requests through the same TypeSafe client (`base_url=`), with no harness changes. It answers as `kev-latest`.
+
+Setup, 2026-09-28:
+
+- One EC2 `p5.4xlarge` (one H100 80 GB) in `us-west-2a`, running Kev's own server at kev ref `1b62aa2d`: bf16, fused kernels and CUDA graphs, one GPU, as upstream serves it.
+- The client was the same `us-west-2` host as the other arms, reached through an SSM port-forward, so latency includes that tunnel. The requests, items and scoring are those of the published run, so every Δ below is paired on the same items. The other arms are the 2026-09-27 run, one day earlier.
+- Cost is instance time, not tokens. The host ran about 23 minutes, and the six tasks took 152 s of wall time at concurrency 4 (966 requests). It was bought as a 7-hour EC2 Capacity Block for $39.19, because no on-demand or SageMaker capacity for a GPU that fits 27B in bf16 was available in `us-west-2`, `us-east-1` or `us-east-2` that day. A per-decision price depends on utilization, so none is given.
+
+Accuracy with a 95% CI, and paired Δ Kev − arm (bold excludes zero):
+
+| Task             | Kev-27B [95% CI]     | Δ vs Jev                    | Δ vs Luna                   | Δ vs Haiku                  | Kev p50 / p95   |
+| ---------------- | -------------------- | --------------------------- | --------------------------- | --------------------------- | --------------- |
+| banking77        | 0.815 [0.760, 0.865] | +0.040 [+0.000, +0.080]     | +0.020 [−0.025, +0.065]     | +0.055 [+0.000, +0.110]     | 0.65 s / 0.98 s |
+| clinc_oos        | 0.770 [0.710, 0.825] | **−0.115 [−0.175, −0.060]** | **−0.130 [−0.190, −0.075]** | **−0.110 [−0.165, −0.060]** | 1.23 s / 1.50 s |
+| prompt_injection | 0.759 [0.681, 0.836] | +0.000 [−0.060, +0.060]     | **−0.078 [−0.129, −0.034]** | **−0.112 [−0.172, −0.060]** | 0.46 s / 0.64 s |
+| multi_choice     | 0.640 [0.560, 0.713] | −0.027 [−0.087, +0.033]     | **−0.160 [−0.227, −0.093]** | **−0.140 [−0.207, −0.073]** | 0.60 s / 0.92 s |
+| multi_yesno      | 0.673 [0.600, 0.753] | **+0.080 [+0.020, +0.140]** | +0.020 [−0.040, +0.080]     | **+0.147 [+0.080, +0.220]** | 0.22 s / 0.49 s |
+| mixed            | 0.547 [0.467, 0.627] | **−0.107 [−0.180, −0.033]** | −0.073 [−0.153, +0.007]     | −0.067 [−0.133, +0.000]     | 0.32 s / 0.57 s |
+
+What Kev-27B shows:
+
+- **It matches Jev on routing with a small label set and on injection, and loses on a large one.** It ties or edges Jev on banking77 (77 intents). It trails Jev and both LLMs by 11 to 13 points on clinc_oos (150 intents plus out-of-scope). On prompt injection its accuracy, precision (1.00) and recall (0.53, the same on English and German) equal Jev's, so it shares Jev's recall gap to the LLMs.
+- **Per question it differs from Jev in both directions.** It is 7 points better on GoEmotions `anger` ([+0.007, +0.120] vs Jev) and 7 points worse on Davidson `category` ([−0.133, −0.013]). On `anger` it says yes less often: precision 0.18 and recall 0.73, against Jev's 0.16 and 0.82. On a question with 11 positives in 150 items, fewer false alarms is most of an accuracy gain. Per-question numbers are in `results-summary.json` under `kev`.
+- **Its latency grows with the request, Jev's does not.** On one H100 Kev's p50 was 0.22 s on the three short GoEmotions YesNos and 0.32 s on `mixed`, 0.46 s on prompt injection (one YesNo over longer texts), 0.60–0.65 s on the 77- and 60-way Choices, and 1.23 s on clinc_oos (151 options). Jev stayed at 0.22–0.23 s on every task. Kev runs each question as its own row continuing from the state, with a Choice's options inside that row, so a long option list is a long row. The client-side token counts do not explain the difference: Jev reports more tokens than Kev on clinc_oos (about 2,530 in against 1,140).
+- **Its confidence is informative and more conservative than Jev's.** At a 0.7 floor Kev covers 69% of items on every single task, against Jev's 78–89%, and is right on 0.94, 0.91 and 0.84 of what it covers. At 0.9 it covers 36–54% and is right on 1.00, 1.00 and 0.90. The same floor therefore escalates more on Kev, which matches the samples: tune floors per engine.
+
+As a cascade front, Kev escalated 31% at a 0.7 floor and 38–44% at 0.8 on the single tasks. Against Haiku it beats Haiku-only on banking77 (floor 0.8: +0.020 [+0.005, +0.040], 40% escalated) and reaches parity on the other two at 0.8–0.9. Against Luna it reaches Luna-only's accuracy at 0.8–0.9 (38–64% escalated) and does not beat it. Per floor: [`results-cascade-kev.json`](./0020-system-one-decision-models/results-cascade-kev.json) (Haiku fallback) and [`results-cascade-kev-luna.json`](./0020-system-one-decision-models/results-cascade-kev-luna.json) (Luna fallback). Their `$ per 1k` is the escalated LLM spend only: Kev's own cost is the instance time above.
+
+For Strands, Kev-27B confirms the design's premise that `DecisionModel` is not one vendor. The same schema, client and adapters run against an open-weights model on your own hardware, with calibrated confidence. It is not a drop-in replacement for Jev on every task, so measure it on your own questions like any other engine.
+
 ## What this supports, and what it does not
 
 **Supported.**
@@ -169,7 +201,6 @@ The first run's Jev latency was 0.50–0.52 s p50 on every task. It was measured
 - **Wording was not tuned per arm.** One question wording served all arms. A prompt tuned for one model could move its numbers, so treat each arm's result as a lower bound.
 - **Small samples.** With 116 to 200 items per task, the CIs are ±4 to 8 points. The ties are "not distinguishable at this n", not proof of equality.
 - **Not measured here:**
-  - Kev: SageMaker had no `ml.p5.4xlarge` capacity in `us-west-2` for ten attempts on 2026-09-27.
   - Model selection quality: samples 2 and 3 in the P0 plan cover it.
   - Non-English routing.
 
@@ -192,7 +223,10 @@ python analyze.py --tasks all --arms jev=jev,luna=global.openai.gpt-6-luna,haiku
 python analyze.py                              # Jev vs Haiku and Nova Micro, the first run's arms
 python cascade.py                              # Haiku fallback
 python cascade.py --slow global.openai.gpt-6-luna --out cascade-luna.json
-KEV_BASE_URL=http://127.0.0.1:8010 python bench.py --tasks all --arms kev   # optional: any /v1/systemone Kev server
+KEV_BASE_URL=http://127.0.0.1:8010 python bench.py --tasks all --arms kev   # any /v1/systemone Kev server
+python analyze.py --tasks all --arms kev=kev,jev=jev,luna=global.openai.gpt-6-luna,haiku=us.anthropic.claude-haiku-4-5-20251001-v1:0
+python cascade.py --fast kev --out cascade-kev.json
+python cascade.py --fast kev --slow global.openai.gpt-6-luna --out cascade-kev-luna.json
 ```
 
 `analyze.py --arms short=id,...` and `cascade.py --fast <id> --slow <id>` take the same arm ids as `bench.py --arms`, so any other arm runs through the same analysis. Accuracy counts an errored item (an API or parse failure) as incorrect. Latency, tokens and cost are computed over non-errored items. Every arm's `errors` count is in the summary. In the published runs it is 0 for every arm and task, so no reported accuracy includes an error.
@@ -202,5 +236,6 @@ Committed summaries:
 - [`results-summary.json`](./0020-system-one-decision-models/results-summary.json): every arm and task.
 - [`results-cascade.json`](./0020-system-one-decision-models/results-cascade.json): the Haiku fallback.
 - [`results-cascade-luna.json`](./0020-system-one-decision-models/results-cascade-luna.json): the Luna fallback. Its keys keep the published names `haiku_only` and `vs_haiku` for the fallback arm.
+- [`results-cascade-kev.json`](./0020-system-one-decision-models/results-cascade-kev.json) and [`results-cascade-kev-luna.json`](./0020-system-one-decision-models/results-cascade-kev-luna.json): Kev-27B as the front, with Haiku and Luna fallbacks (same key names).
 
 Per-item results are regenerated by `bench.py`.

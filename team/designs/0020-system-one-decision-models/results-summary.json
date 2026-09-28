@@ -561,5 +561,230 @@
     ],
     "precision": 0.9697,
     "recall": 0.5333
+  },
+  "banking77::kev": {
+    "arm": "kev",
+    "task": "banking77",
+    "n": 200,
+    "errors": 0,
+    "accuracy": 0.815,
+    "p50_s": 0.641,
+    "p95_s": 0.976,
+    "mean_in_tokens": 824.7,
+    "mean_out_tokens": 1032.2,
+    "usd_per_1k": null,
+    "wall_s": 31.5,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "selective": [
+      {
+        "min_conf": 0.0,
+        "coverage": 1.0,
+        "accuracy": 0.815
+      },
+      {
+        "min_conf": 0.3,
+        "coverage": 0.93,
+        "accuracy": 0.8548
+      },
+      {
+        "min_conf": 0.5,
+        "coverage": 0.82,
+        "accuracy": 0.9024
+      },
+      {
+        "min_conf": 0.7,
+        "coverage": 0.69,
+        "accuracy": 0.9348
+      },
+      {
+        "min_conf": 0.9,
+        "coverage": 0.48,
+        "accuracy": 1.0
+      }
+    ]
+  },
+  "clinc_oos::kev": {
+    "arm": "kev",
+    "task": "clinc_oos",
+    "n": 200,
+    "errors": 0,
+    "accuracy": 0.77,
+    "p50_s": 1.226,
+    "p95_s": 1.498,
+    "mean_in_tokens": 1135.6,
+    "mean_out_tokens": 1649.0,
+    "usd_per_1k": null,
+    "wall_s": 61.0,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "selective": [
+      {
+        "min_conf": 0.0,
+        "coverage": 1.0,
+        "accuracy": 0.77
+      },
+      {
+        "min_conf": 0.3,
+        "coverage": 1.0,
+        "accuracy": 0.77
+      },
+      {
+        "min_conf": 0.5,
+        "coverage": 0.885,
+        "accuracy": 0.791
+      },
+      {
+        "min_conf": 0.7,
+        "coverage": 0.69,
+        "accuracy": 0.9058
+      },
+      {
+        "min_conf": 0.9,
+        "coverage": 0.36,
+        "accuracy": 1.0
+      }
+    ]
+  },
+  "prompt_injection::kev": {
+    "arm": "kev",
+    "task": "prompt_injection",
+    "n": 116,
+    "errors": 0,
+    "accuracy": 0.7586,
+    "p50_s": 0.459,
+    "p95_s": 0.645,
+    "mean_in_tokens": 99.7,
+    "mean_out_tokens": 21.8,
+    "usd_per_1k": null,
+    "wall_s": 14.1,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "precision": 1.0,
+    "recall": 0.5333,
+    "selective": [
+      {
+        "min_conf": 0.0,
+        "coverage": 1.0,
+        "accuracy": 0.7586
+      },
+      {
+        "min_conf": 0.3,
+        "coverage": 0.931,
+        "accuracy": 0.7778
+      },
+      {
+        "min_conf": 0.5,
+        "coverage": 0.828,
+        "accuracy": 0.7812
+      },
+      {
+        "min_conf": 0.7,
+        "coverage": 0.69,
+        "accuracy": 0.8375
+      },
+      {
+        "min_conf": 0.9,
+        "coverage": 0.543,
+        "accuracy": 0.9048
+      }
+    ]
+  },
+  "multi_choice::kev": {
+    "arm": "kev",
+    "task": "multi_choice",
+    "n": 150,
+    "errors": 0,
+    "accuracy": 0.64,
+    "p50_s": 0.601,
+    "p95_s": 0.918,
+    "mean_in_tokens": 634.3,
+    "mean_out_tokens": 1005.3,
+    "usd_per_1k": null,
+    "wall_s": 21.5,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "questions": 2,
+    "per_question_accuracy": {
+      "scenario": 0.7667,
+      "intent": 0.78
+    }
+  },
+  "multi_yesno::kev": {
+    "arm": "kev",
+    "task": "multi_yesno",
+    "n": 150,
+    "errors": 0,
+    "accuracy": 0.6733,
+    "p50_s": 0.22,
+    "p95_s": 0.488,
+    "mean_in_tokens": 80.6,
+    "mean_out_tokens": 67.7,
+    "usd_per_1k": null,
+    "wall_s": 10.2,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "questions": 3,
+    "per_question_accuracy": {
+      "anger": 0.74,
+      "gratitude": 0.98,
+      "curiosity": 0.9467
+    },
+    "per_question_yesno": {
+      "anger": {
+        "positives": 11,
+        "precision": 0.1818,
+        "recall": 0.7273
+      },
+      "gratitude": {
+        "positives": 13,
+        "precision": 0.8125,
+        "recall": 1.0
+      },
+      "curiosity": {
+        "positives": 7,
+        "precision": 0.4444,
+        "recall": 0.5714
+      }
+    }
+  },
+  "mixed::kev": {
+    "arm": "kev",
+    "task": "mixed",
+    "n": 150,
+    "errors": 0,
+    "accuracy": 0.5467,
+    "p50_s": 0.322,
+    "p95_s": 0.568,
+    "mean_in_tokens": 144.0,
+    "mean_out_tokens": 117.0,
+    "usd_per_1k": null,
+    "wall_s": 13.5,
+    "answered_by": [
+      "kev-latest"
+    ],
+    "questions": 3,
+    "per_question_accuracy": {
+      "category": 0.74,
+      "offensive": 0.84,
+      "any_hate_vote": 0.7667
+    },
+    "per_question_yesno": {
+      "offensive": {
+        "positives": 100,
+        "precision": 0.9318,
+        "recall": 0.82
+      },
+      "any_hate_vote": {
+        "positives": 66,
+        "precision": 0.8974,
+        "recall": 0.5303
+      }
+    }
   }
 }

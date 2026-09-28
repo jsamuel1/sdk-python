@@ -2,7 +2,8 @@
 
 Usage: analyze.py [--arms jev=jev,haiku=<bedrock id>,...] [--tasks single|multi|all|t1,t2]. Each arm entry is
 short-name=arm id as passed to bench.py --arms; the first arm is the reference that every other arm is diffed
-against. The defaults match the published baseline.
+against. The default arms (Jev, Haiku, Nova Micro) reproduce the first run's comparison, kept as History in the
+baseline doc. The headline and Kev comparisons pass --arms explicitly (see the doc's Reproduce section).
 """
 
 import argparse

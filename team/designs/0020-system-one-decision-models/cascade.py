@@ -21,6 +21,9 @@ PRICES = {
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
     "us.amazon.nova-micro-v1:0": (0.035, 0.14),
     "global.openai.gpt-6-luna": (0.10, 0.50),
+    # Self-hosted: no per-token price. Its cost is instance time, reported in the baseline doc, so the $ column of a
+    # Kev cascade is the escalated LLM spend only.
+    "kev": (0.0, 0.0),
 }
 TASKS = ["banking77", "clinc_oos", "prompt_injection"]
 
