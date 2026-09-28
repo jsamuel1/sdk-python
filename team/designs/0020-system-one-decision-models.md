@@ -42,7 +42,7 @@ Strands has no way to express "ask a decision model a typed question." Developer
 | Guardrail (approval, severity, faithful output) | Noul + Score(4) + Noul | 0.60 s            | 421          | approval p=0.97; severity 2.93 on levels 0–3; output faithful p=0.24                 |
 | Fan-out: 1 question vs 12 on the same state     | 1 / 12                 | 0.579 s / 0.568 s | 339 / 751    | latency flat in question count                                                       |
 
-Two observations drive the design. First, the routing row's low confidence is _correct_ — the request genuinely has two issues — and it is exactly the signal an LLM index cannot give. Second, twelve questions cost the same wall-clock as one, so the API must make asking together the default, not an optimization. At the listed price ($0.042 per million input tokens, output free) a decision costs on the order of $0.00002. A same-task LLM baseline on public labeled data is in the companion [baseline](./0020-system-one-decision-models-baseline.md). Jev ties Claude Haiku 4.5 on intent routing at about 1/30th of the cost and 0.3 s lower median latency (0.25 s on the guardrail task). It trails Haiku by 11 points on prompt-injection detection. A confidence-gated cascade to the LLM beats Haiku-only on routing at about a fifth of the cost.
+Two observations drive the design. First, the routing row's low confidence is _correct_ — the request genuinely has two issues — and it is exactly the signal an LLM index cannot give. Second, twelve questions cost the same wall-clock as one, so the API must make asking together the default, not an optimization. At the listed price ($0.042 per million input tokens, output free) a decision costs on the order of $0.00002. A same-task LLM baseline on public labeled data is in the companion [baseline](./0020-system-one-decision-models-baseline.md). Jev ties both GPT-6 Luna and Claude Haiku 4.5 on intent routing, at about half of Luna's cost and 1/30th of Haiku's. Measured from one host, it answers one to three questions in one request at about 0.23 s median, about 0.4 s faster than Luna and 0.6 s faster than Haiku. It trails Luna by 8 points and Haiku by 11 on prompt-injection detection. Asked several questions about one input, it ties or beats the LLMs on most questions but trails both on one coarse label. A confidence-gated cascade to the LLM beats Haiku-only on routing at about a fifth of the cost, and matches Luna-only at about two thirds of the cost and a third of the median latency.
 
 ## Goals
 
@@ -239,7 +239,7 @@ check_citation = decision_tool(jev, CitationCheck, state_schema=CitationInput,
 writer = Agent(model=sonnet, tools=[check_citation])
 ```
 
-**Guardrails — `DecisionGuard` and the HITL classifier.** `DecisionGuard` is an `InterventionHandler`. Its `before_tool_call` asks a risk `YesNo` and a severity `Score` over the tool name and input, then maps the approval probability to `Proceed`, `Confirm`, or `Deny` using code-owned floors (`confirm_above=0.5`, `deny_above=0.95`). It needs no separate confidence floor: an unsure risk answer is a probability near 0.5, which the default `confirm_above` sends to a person. A second question set in `after_model_call` can check the model's output. `decision_classifier(jev)` implements the existing `HumanInTheLoopClassifier` protocol, so `HumanInTheLoop` gains a System One classifier without changing HITL. Guards fail closed by default: an error maps to `Confirm`. This is configurable.
+**Guardrails — `DecisionGuard` and the HITL classifier.** `DecisionGuard` is an `InterventionHandler`. Its `before_tool_call` asks a risk `YesNo` and a severity `Score` over the tool name and input, then maps the approval probability to `Proceed`, `Confirm`, or `Deny` using code-owned floors in a `GuardPolicy` (`confirm_above=0.5`, `deny_above=0.95`). Floors are set per consequence: `policy` covers every tool, and `policies` overrides it by exact tool name, so a destructive `shell` can deny at a lower floor while `send_email` never auto-denies (`deny_above=None`). `deny_min_severity` additionally requires the severity score before an outright Deny; a Deny it blocks becomes `Confirm`, the fail-safe direction. The developer knows which tools are destructive, so that fact stays in code rather than in one global threshold. It needs no separate confidence floor: an unsure risk answer is a probability near 0.5, which the default `confirm_above` sends to a person. A second question set in `after_model_call` can check the model's output. `decision_classifier(jev)` implements the existing `HumanInTheLoopClassifier` protocol, so `HumanInTheLoop` gains a System One classifier without changing HITL. Guards fail closed by default: an error maps to `Confirm`. This is configurable.
 
 **Computer and browser use.** No new adapter is needed. The sample shows the pattern: code extracts actionable elements from the accessibility tree; one request asks a `Choice` over the element ids plus `YesNo` goal-reached and `YesNo` needs-reasoning; high confidence acts directly, and anything else escalates to the LLM computer-use agent. That generalizes into the P1 below.
 
@@ -271,9 +271,15 @@ def when_below(node_id: str, field: str, confidence: float) -> DecisionEdgeCondi
 def decision_tool(decision_model: DecisionModel, schema: type[BaseModel], *,
                   state_schema: type[BaseModel], name: str, description: str) -> DecisionTool: ...
 
+@dataclass(frozen=True)
+class GuardPolicy:
+    confirm_above: float = 0.5
+    deny_above: float | None = 0.95          # None: never auto-deny, a person always decides
+    deny_min_severity: float | None = None   # Deny also needs severity >= this; else Confirm
+
 class DecisionGuard(InterventionHandler):
-    def __init__(self, decision_model: DecisionModel, *, confirm_above: float = 0.5,
-                 deny_above: float = 0.95,
+    def __init__(self, decision_model: DecisionModel, *, policy: GuardPolicy | None = None,
+                 policies: Mapping[str, GuardPolicy] | None = None,   # exact tool name -> floors
                  on_decision_error: Literal["confirm", "deny", "proceed"] = "confirm",
                  risk_instructions: str = RISK_INSTRUCTIONS,
                  severity_levels: Sequence[str] = SEVERITY_LEVELS,
@@ -410,7 +416,7 @@ support("I was charged twice and can't log in")    # confidence 0.46 → fallbac
 **Same schema, different engine.** This is useful for tests, offline development, and A/B comparison.
 
 ```python
-decision = await LLMDecisionModel(BedrockModel("amazon.nova-micro-v1:0")).decide(Triage, state=ticket)
+decision = await LLMDecisionModel(BedrockModel("global.openai.gpt-6-luna")).decide(Triage, state=ticket)
 decision.answers["department"].confidence    # None — uncalibrated; gates with min_confidence refuse this model
 ```
 
@@ -475,7 +481,7 @@ Needs attention:
 - `ClassifierStrategy` and `DecisionStrategy` coexist. The docs need a clear "use `DecisionStrategy` with a calibrated model; `ClassifierStrategy` when you only have an LLM" line.
 - Jev's rate limits are currently dynamic (per the vendor's model page). Adapters must degrade per their failure table rather than stall an agent.
 - Alias drift: `jev-latest` can move under tuned thresholds. Docs recommend pinning a versioned id once thresholds are tuned, and spans record the id that answered.
-- `DecisionAgent.message` is templated text, not model prose. Consumers that expect a conversational reply from every `AgentBase` must read `structured_output`.
+- `DecisionAgent.message` is templated text, not model prose. Consumers that expect a conversational reply from every `AgentBase` must read `state["decision"]` (`DECISION_STATE_KEY`), which is present on every result, routed or not.
 
 Migration: none. Everything is additive and opt-in.
 

@@ -20,6 +20,7 @@ PRICES = {
     "jev": (0.042, 0.0),
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
     "us.amazon.nova-micro-v1:0": (0.035, 0.14),
+    "global.openai.gpt-6-luna": (0.10, 0.50),
 }
 TASKS = ["banking77", "clinc_oos", "prompt_injection"]
 
@@ -37,6 +38,7 @@ def p(xs, q):
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--fast", default="jev", help="arm answered first (must report confidence)")
 parser.add_argument("--slow", default="us.anthropic.claude-haiku-4-5-20251001-v1:0", help="escalation arm")
+parser.add_argument("--out", default="cascade.json", help="file name under results/")
 args = parser.parse_args()
 FAST, SLOW = args.fast, args.slow
 
@@ -81,4 +83,4 @@ for task in TASKS:
         )
     out[task] = {"haiku_only": {"accuracy": round(base_acc, 3), "usd_per_1k": round(base_cost, 3)}, "cascade": rows}
 
-(pathlib.Path(__file__).parent / "results" / "cascade.json").write_text(json.dumps(out, indent=2))
+(pathlib.Path(__file__).parent / "results" / args.out).write_text(json.dumps(out, indent=2))

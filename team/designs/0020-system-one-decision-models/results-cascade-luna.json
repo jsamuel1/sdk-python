@@ -1,84 +1,84 @@
 {
   "banking77": {
     "haiku_only": {
-      "accuracy": 0.76,
-      "usd_per_1k": 2.69
+      "accuracy": 0.795,
+      "usd_per_1k": 0.153
     },
     "cascade": [
       {
         "min_conf": 0.5,
         "escalated": 0.06,
-        "accuracy": 0.775,
+        "accuracy": 0.79,
         "ci": [
-          0.715,
-          0.835
+          0.73,
+          0.845
         ],
-        "vs_haiku": 0.015,
+        "vs_haiku": -0.005,
         "vs_haiku_ci": [
-          -0.02,
-          0.055
+          -0.045,
+          0.035
         ],
-        "usd_per_1k": 0.233,
+        "usd_per_1k": 0.08,
         "p50_s": 0.228,
-        "p95_s": 0.987
+        "p95_s": 0.803
       },
       {
         "min_conf": 0.7,
         "escalated": 0.19,
-        "accuracy": 0.785,
+        "accuracy": 0.8,
         "ci": [
-          0.725,
-          0.84
+          0.745,
+          0.855
         ],
-        "vs_haiku": 0.025,
+        "vs_haiku": 0.005,
         "vs_haiku_ci": [
-          0.0,
-          0.05
+          -0.015,
+          0.025
         ],
-        "usd_per_1k": 0.582,
+        "usd_per_1k": 0.1,
         "p50_s": 0.232,
-        "p95_s": 1.107
+        "p95_s": 0.898
       },
       {
         "min_conf": 0.8,
         "escalated": 0.23,
-        "accuracy": 0.78,
+        "accuracy": 0.8,
         "ci": [
-          0.72,
-          0.835
-        ],
-        "vs_haiku": 0.02,
-        "vs_haiku_ci": [
-          0.0,
-          0.045
-        ],
-        "usd_per_1k": 0.69,
-        "p50_s": 0.236,
-        "p95_s": 1.122
-      },
-      {
-        "min_conf": 0.9,
-        "escalated": 0.325,
-        "accuracy": 0.765,
-        "ci": [
-          0.705,
-          0.825
+          0.745,
+          0.855
         ],
         "vs_haiku": 0.005,
         "vs_haiku_ci": [
           -0.01,
-          0.02
+          0.025
         ],
-        "usd_per_1k": 0.945,
+        "usd_per_1k": 0.106,
+        "p50_s": 0.236,
+        "p95_s": 0.898
+      },
+      {
+        "min_conf": 0.9,
+        "escalated": 0.325,
+        "accuracy": 0.79,
+        "ci": [
+          0.735,
+          0.845
+        ],
+        "vs_haiku": -0.005,
+        "vs_haiku_ci": [
+          -0.015,
+          0.0
+        ],
+        "usd_per_1k": 0.121,
         "p50_s": 0.243,
-        "p95_s": 1.155
+        "p95_s": 0.902
       }
     ]
   },
   "clinc_oos": {
     "haiku_only": {
-      "accuracy": 0.88,
-      "usd_per_1k": 3.142
+      "accuracy": 0.9,
+      "usd_per_1k": 0.208
     },
     "cascade": [
       {
@@ -89,141 +89,141 @@
           0.845,
           0.93
         ],
-        "vs_haiku": 0.01,
+        "vs_haiku": -0.01,
         "vs_haiku_ci": [
-          -0.035,
-          0.055
+          -0.055,
+          0.035
         ],
-        "usd_per_1k": 0.185,
+        "usd_per_1k": 0.111,
         "p50_s": 0.231,
         "p95_s": 0.302
       },
       {
         "min_conf": 0.7,
         "escalated": 0.11,
-        "accuracy": 0.905,
+        "accuracy": 0.89,
         "ci": [
-          0.865,
-          0.945
+          0.845,
+          0.93
         ],
-        "vs_haiku": 0.025,
+        "vs_haiku": -0.01,
         "vs_haiku_ci": [
-          -0.015,
-          0.065
+          -0.04,
+          0.02
         ],
-        "usd_per_1k": 0.452,
+        "usd_per_1k": 0.129,
         "p50_s": 0.235,
-        "p95_s": 1.041
+        "p95_s": 0.898
       },
       {
         "min_conf": 0.8,
         "escalated": 0.17,
-        "accuracy": 0.92,
+        "accuracy": 0.905,
         "ci": [
-          0.88,
-          0.955
+          0.86,
+          0.945
         ],
-        "vs_haiku": 0.04,
+        "vs_haiku": 0.005,
         "vs_haiku_ci": [
-          0.01,
-          0.07
+          -0.02,
+          0.03
         ],
-        "usd_per_1k": 0.64,
+        "usd_per_1k": 0.141,
         "p50_s": 0.238,
-        "p95_s": 1.065
+        "p95_s": 0.911
       },
       {
         "min_conf": 0.9,
         "escalated": 0.26,
-        "accuracy": 0.895,
+        "accuracy": 0.905,
         "ci": [
-          0.85,
-          0.935
+          0.86,
+          0.945
         ],
-        "vs_haiku": 0.015,
+        "vs_haiku": 0.005,
         "vs_haiku_ci": [
-          -0.005,
-          0.04
+          -0.01,
+          0.02
         ],
-        "usd_per_1k": 0.923,
+        "usd_per_1k": 0.16,
         "p50_s": 0.242,
-        "p95_s": 1.094
+        "p95_s": 0.954
       }
     ]
   },
   "prompt_injection": {
     "haiku_only": {
-      "accuracy": 0.871,
-      "usd_per_1k": 1.035
+      "accuracy": 0.836,
+      "usd_per_1k": 0.024
     },
     "cascade": [
       {
         "min_conf": 0.5,
         "escalated": 0.112,
-        "accuracy": 0.776,
+        "accuracy": 0.767,
         "ci": [
-          0.698,
-          0.845
+          0.69,
+          0.836
         ],
-        "vs_haiku": -0.095,
+        "vs_haiku": -0.069,
         "vs_haiku_ci": [
-          -0.155,
-          -0.043
+          -0.121,
+          -0.026
         ],
-        "usd_per_1k": 0.133,
+        "usd_per_1k": 0.019,
         "p50_s": 0.228,
-        "p95_s": 0.963
+        "p95_s": 0.828
       },
       {
         "min_conf": 0.7,
         "escalated": 0.224,
-        "accuracy": 0.836,
+        "accuracy": 0.802,
         "ci": [
-          0.767,
-          0.897
+          0.724,
+          0.871
         ],
         "vs_haiku": -0.034,
         "vs_haiku_ci": [
           -0.069,
           -0.009
         ],
-        "usd_per_1k": 0.253,
+        "usd_per_1k": 0.022,
         "p50_s": 0.233,
-        "p95_s": 1.018
+        "p95_s": 0.885
       },
       {
         "min_conf": 0.8,
         "escalated": 0.276,
-        "accuracy": 0.845,
+        "accuracy": 0.828,
         "ci": [
-          0.776,
-          0.905
-        ],
-        "vs_haiku": -0.026,
-        "vs_haiku_ci": [
-          -0.06,
-          0.0
-        ],
-        "usd_per_1k": 0.307,
-        "p50_s": 0.235,
-        "p95_s": 1.037
-      },
-      {
-        "min_conf": 0.9,
-        "escalated": 0.362,
-        "accuracy": 0.862,
-        "ci": [
-          0.793,
-          0.922
+          0.759,
+          0.897
         ],
         "vs_haiku": -0.009,
         "vs_haiku_ci": [
           -0.026,
           0.0
         ],
-        "usd_per_1k": 0.398,
+        "usd_per_1k": 0.023,
+        "p50_s": 0.235,
+        "p95_s": 0.891
+      },
+      {
+        "min_conf": 0.9,
+        "escalated": 0.362,
+        "accuracy": 0.836,
+        "ci": [
+          0.767,
+          0.905
+        ],
+        "vs_haiku": 0.0,
+        "vs_haiku_ci": [
+          0.0,
+          0.0
+        ],
+        "usd_per_1k": 0.025,
         "p50_s": 0.242,
-        "p95_s": 1.037
+        "p95_s": 0.893
       }
     ]
   }

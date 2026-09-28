@@ -1,8 +1,8 @@
 """Paired analysis of bench results: accuracy 95% CIs, paired bootstrap of differences, per-language split.
 
-Usage: analyze.py [--arms jev=jev,haiku=<bedrock id>,...]. Each entry is short-name=arm id as passed to
-bench.py --arms; the first arm is the reference that every other arm is diffed against. The default matches the
-published baseline.
+Usage: analyze.py [--arms jev=jev,haiku=<bedrock id>,...] [--tasks single|multi|all|t1,t2]. Each arm entry is
+short-name=arm id as passed to bench.py --arms; the first arm is the reference that every other arm is diffed
+against. The defaults match the published baseline.
 """
 
 import argparse
@@ -16,7 +16,9 @@ R = HERE / "results"  # written by bench.py (not committed; rerun to regenerate)
 DATA = HERE / "data"  # written by fetch_datasets.py
 DEFAULT_ARMS = "jev=jev,haiku=us.anthropic.claude-haiku-4-5-20251001-v1:0,nova=us.amazon.nova-micro-v1:0"
 ARMS: dict[str, str] = {}
-TASKS = ["banking77", "clinc_oos", "prompt_injection"]
+SINGLE_TASKS = ["banking77", "clinc_oos", "prompt_injection"]
+MULTI_TASKS = ["multi_choice", "multi_yesno", "mixed"]
+TASKS = list(SINGLE_TASKS)
 GERMAN = re.compile(r"\b(und|nicht|ich|der|die|das|ist|mit|sie|wie|für|auf|eine?)\b", re.I)
 
 
@@ -75,9 +77,29 @@ def language_report():
             )
 
 
+def multi_report():
+    """Per-question paired differences on multi-decision tasks (one request answered every question)."""
+    for task in [t for t in TASKS if t in MULTI_TASKS]:
+        rows = {arm: sorted(load(task, arm), key=lambda r: r["i"]) for arm in ARMS}
+        ref, *others = ARMS
+        print(f"== {task} per question")
+        for qid in rows[ref][0]["per_q"]:
+            for other in others:
+                pairs = zip(rows[ref], rows[other], strict=True)
+                diff = [float(a["per_q"][qid]) - float(b["per_q"][qid]) for a, b in pairs]
+                lo, hi = boot(diff)
+                print(f"  {qid:14} {ref}-{other:5} diff={sum(diff) / len(diff):+.3f}  95%CI=[{lo:+.3f},{hi:+.3f}]")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--arms", default=DEFAULT_ARMS)
-    ARMS.update(parse_arms(parser.parse_args().arms))
+    parser.add_argument("--tasks", default="single")
+    a = parser.parse_args()
+    ARMS.update(parse_arms(a.arms))
+    named = {"all": SINGLE_TASKS + MULTI_TASKS, "single": SINGLE_TASKS, "multi": MULTI_TASKS}
+    TASKS[:] = [t for name in a.tasks.split(",") for t in named.get(name, [name])]
     accuracy_report()
-    language_report()
+    multi_report()
+    if "prompt_injection" in TASKS:
+        language_report()
