@@ -78,7 +78,7 @@ The proposal has three layers. Each layer uses only the one beneath it, so a dev
 ```
  Layer 3  Integrations      DecisionStrategy · DecisionAgent(routes=) · when_choice() · decision_tool() · DecisionGuard
                                    │ uses
- Layer 2  Typed schema      Pydantic class with Choice / Score / YesNo fields  →  Decision[T]
+ Layer 2  Typed schema      DecisionSchema subclass with Choice / Score / YesNo fields  →  Decision[T]
                                    │ compiles to
  Layer 1  Primitive         DecisionModel.ask(state, questions) → answers
                             providers: TypeSafeDecisionModel (Jev) · LLMDecisionModel(model) · your own
@@ -184,14 +184,13 @@ Question types are small frozen dataclasses mirroring the three closed shapes. T
 
 #### Layer 2 — typed schemas (G3)
 
-The high-level API reuses the idiom Strands developers already know from `structured_output_model`: **a Pydantic class is the schema.** Field types say what is being decided and markers say how to ask:
+The high-level API reuses the idiom Strands developers already know from `structured_output_model`: **a Pydantic class is the schema.** A decision schema subclasses **`DecisionSchema`**, a `BaseModel` subclass. Field types say what is being decided and markers say how to ask:
 
 ```python
 from typing import Annotated, Literal
-from pydantic import BaseModel
-from strands.decisions import Choice, Score, YesNo
+from strands.decisions import Choice, DecisionSchema, Score, YesNo
 
-class Triage(BaseModel):
+class Triage(DecisionSchema):
     department: Annotated[
         Literal["billing", "technical", "sales"],
         Choice("Which team should handle `ticket`?", options={
@@ -209,6 +208,8 @@ decision.answers["department"].confidence  # 0.81
 decision.answers["urgent"].probability     # 0.95
 ```
 
+**Why a named base.** `DecisionSchema` compiles each subclass at class definition (Pydantic's `__pydantic_init_subclass__`), so an unanswerable field fails at import, not on the first request. It also names the intent: a reader can tell a decision schema from a data schema, such as a `decision_tool`'s `state_schema`, at the class line. And it gives runtime schemas a home (`DecisionSchema.build`, below). It adds no fields, config or behavior beyond that check, so a subclass is still an ordinary `BaseModel` and a valid `structured_output_model`. `decide` also accepts a plain `BaseModel`, compiled on first use, so existing closed-set models are reused unchanged. Requiring the base was rejected, because it would break that reuse for no gain in what can be checked. A non-Pydantic base (a dataclass or `TypedDict`) was rejected, because it loses validation and the `structured_output_model` bridge.
+
 `decide(schema, state)` is a concrete method on `DecisionModel`. It compiles the class into questions **once** (cached per class) and calls `ask` a single time, so every field is asked together. Asking together is a contract on the call, not a latency guarantee; adapters must not assume latency is flat in question count. It then builds `Decision[T]`, where `output: T` holds the validated instance and `answers` holds the full per-field distributions.
 
 Compile rules keep the obvious path correct:
@@ -221,7 +222,7 @@ Compile rules keep the obvious path correct:
 
 The class is also a valid `structured_output_model`, so one schema runs on Jev or on any LLM (through `LLMDecisionModel`) without edits. This is what makes the choice of engine a deployment decision rather than a rewrite.
 
-Dynamic option sets (agent names, candidate models, on-screen elements) cannot be `Literal`. They use the low-level `ask` with `Choice(options=…)` built at runtime, or `DecisionSchema.build(...)`, which returns a typed-enough `Decision[dict]`. Every Layer 3 adapter with runtime options builds its questions this way.
+Dynamic option sets (agent names, candidate models, on-screen elements) cannot be `Literal`. They use the low-level `ask` with `Choice(options=…)` built at runtime, or `DecisionSchema.build(name, **questions)`. That returns a compiled `DecisionSchema` subclass: a `Choice` becomes a `Literal` over its options, a `YesNo` a `bool`, and a `Score` a `float`, so `decide` validates the output exactly as it does for a declared class. Its fields exist at runtime but are not statically typed, so code reads them from `decision.answers` or with `getattr`. Every Layer 3 adapter with runtime options builds its questions this way.
 
 **State projection.** `state` is whatever the caller passes. For adapters that start from an agent conversation, a shared helper `project_state(messages, system_prompt, *, max_tokens)` builds on the bounded latest-request and instruction extraction that [#4586](https://github.com/strands-agents/harness-sdk/pull/4586) moves out of `ClassifierStrategy` into one module, so every adapter bounds and sanitizes the same way. Limits are in tokens ([LLM-native units](../DECISIONS.md#use-llm-native-units-in-public-apis)). Because a System One request separates `instructions` (developer-authored) from `state` (data), untrusted content never sits in the instruction channel. State can still try to persuade, so adapters document it as untrusted and never interpolate state into instructions.
 
@@ -389,7 +390,7 @@ The core types live in `strands.decisions` as one flat module: `DecisionModel`, 
 
 #### TypeScript (G9)
 
-The same three layers, adapted to the language. Zod is the schema idiom, so `z.enum([...])` compiles to `Choice`, `z.boolean()` to `YesNo`, and `score(levels)` (a branded `z.number()`) to `Score`. Descriptions come from `.describe()` or the marker helpers `choice()`, `yesNo()`, and `score()`, which mirror the TypeSafe JS SDK's helpers. `DecisionModel` is an abstract class with `ask()`. `decide(schema, state)` infers `Decision<z.infer<typeof schema>>`. `TypeSafeDecisionModel` takes `@typesafe-ai/sdk` (MIT) as an optional peer dependency. Everything exports from `@strands-agents/sdk/experimental`, and later from `@strands-agents/sdk/decisions`. `DecisionStrategy` implements the TS `RoutingStrategy`. Names are recased per SDK convention (`minConfidence`, `routeOn`).
+The same three layers, adapted to the language. Zod is the schema idiom, so `z.enum([...])` compiles to `Choice`, `z.boolean()` to `YesNo`, and `score(levels)` (a branded `z.number()`) to `Score`. Descriptions come from `.describe()` or the marker helpers `choice()`, `yesNo()`, and `score()`, which mirror the TypeSafe JS SDK's helpers. `DecisionModel` is an abstract class with `ask()`. `decide(schema, state)` infers `Decision<z.infer<typeof schema>>`. The TS counterpart of `DecisionSchema` is the exported type `DecisionSchema` (a `z.ZodObject`). Zod schemas are values, not classes, so there is no base to subclass. `compileSchema` gives the early check, and `z.object({...})` with runtime `choice(options)` already covers what `build` does. `TypeSafeDecisionModel` takes `@typesafe-ai/sdk` (MIT) as an optional peer dependency. Everything exports from `@strands-agents/sdk/experimental`, and later from `@strands-agents/sdk/decisions`. `DecisionStrategy` implements the TS `RoutingStrategy`. Names are recased per SDK convention (`minConfidence`, `routeOn`).
 
 **Pros:** It meets every goal without touching `Agent` or `Model`. One schema runs on Jev or any LLM. Each integration reuses a seam that already exists (`RoutingStrategy`, `AgentBase`, `EdgeCondition`, `AgentTool`, `InterventionHandler`, `HumanInTheLoopClassifier`). Uncertainty is a first-class value at every point. It extends to other System One vendors.
 
