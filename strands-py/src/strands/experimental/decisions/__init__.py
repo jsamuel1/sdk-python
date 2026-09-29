@@ -8,6 +8,7 @@ Experimental: subject to change without notice. See ``team/designs/0020-system-o
 
 from ...models._request_text import project_state
 from ._agent import DECISION_STATE_KEY, DecisionAgent
+from ._fast_path import FastPath, ToolCall
 from ._fit import TemperatureFit, fit_temperature
 from ._graph import DecisionEdgeCondition, when_below, when_choice, when_yes
 from ._guard import DecisionGuard, GuardPolicy, decision_classifier
@@ -48,12 +49,14 @@ __all__ = [
     "DecisionState",
     "DecisionStrategy",
     "DecisionTool",
+    "FastPath",
     "GuardPolicy",
     "LLMDecisionModel",
     "Question",
     "Score",
     "ScoreAnswer",
     "TemperatureFit",
+    "ToolCall",
     "YesNo",
     "YesNoAnswer",
     "compile_schema",

@@ -10,3 +10,9 @@ import { Agent, BedrockModel, ModelRouter, RoutingCandidate } from '@strands-age
 import { DecisionStrategy } from '@strands-agents/sdk/experimental'
 import { TypeSafeDecisionModel } from '@strands-agents/sdk/models/typesafe'
 // --8<-- [end:model_selection_imports]
+
+// --8<-- [start:fast_path_imports]
+import { Agent } from '@strands-agents/sdk'
+import { FastPath, ToolCall } from '@strands-agents/sdk/experimental'
+import { TypeSafeDecisionModel } from '@strands-agents/sdk/models/typesafe'
+// --8<-- [end:fast_path_imports]

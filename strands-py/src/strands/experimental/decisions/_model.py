@@ -5,7 +5,7 @@ from __future__ import annotations
 import abc
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
 from opentelemetry import trace as trace_api
@@ -88,6 +88,17 @@ class DecisionModel(abc.ABC):
         Raises:
             ValueError: If ``questions`` is empty, or the provider returned answers that do not match the questions.
         """
+        return await self._traced_ask(state, questions, **kwargs)
+
+    async def _traced_ask(
+        self,
+        state: DecisionState,
+        questions: Mapping[str, Question],
+        *,
+        _span_attributes: Callable[[DecisionResponse], Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> DecisionResponse:
+        """``ask``, plus adapter-owned attributes derived from the response and recorded on the decision span."""
         if not questions:
             raise ValueError("ask() needs at least one question")
         empty = [
@@ -116,7 +127,10 @@ class DecisionModel(abc.ABC):
         except Exception as error:
             tracer.end_span_with_error(span, str(error), error)
             raise
-        tracer._end_span(span, attributes=_span_result_attributes(response))
+        attributes = _span_result_attributes(response)
+        if _span_attributes is not None:
+            attributes.update(_span_attributes(response))
+        tracer._end_span(span, attributes=attributes)
         return response
 
     async def decide(self, schema: type[T], state: DecisionState, **kwargs: Any) -> Decision[T]:

@@ -3,16 +3,23 @@ import type { AskOptions, DecisionModelConfig } from '../decision-model.js'
 import { ChoiceAnswer, DecisionResponse, ScoreAnswer, YesNoAnswer, yesNoConfidence } from '../types.js'
 import type { Answer, DecisionState, Question } from '../types.js'
 
-/** A scripted decision model that records every request. */
+type Scripted = Readonly<Record<string, Answer>> | Error
+
+/**
+ * A scripted decision model that records every request. Pass one answer map (or error) for every call, or an array
+ * to answer successive calls in order; an exhausted queue repeats its last entry.
+ */
 export class MockDecisionModel extends DecisionModel {
   readonly requests: Array<{ state: DecisionState; questions: Readonly<Record<string, Question>> }> = []
   private _config: DecisionModelConfig = { modelId: 'mock-s1' }
+  private readonly _queue: Scripted[]
 
   constructor(
-    private readonly _answers: Readonly<Record<string, Answer>> | Error = {},
+    answers: Scripted | readonly Scripted[] = {},
     private readonly _calibrated = true
   ) {
     super()
+    this._queue = Array.isArray(answers) ? [...answers] : [answers as Scripted]
   }
 
   override get calibrated(): boolean {
@@ -33,8 +40,9 @@ export class MockDecisionModel extends DecisionModel {
     _options: AskOptions
   ): Promise<DecisionResponse> {
     this.requests.push({ state, questions })
-    if (this._answers instanceof Error) throw this._answers
-    return new DecisionResponse(this._answers, 'mock-s1-1.0', { inputTokens: 10, outputTokens: 2, totalTokens: 12 })
+    const answers = this._queue.length > 1 ? this._queue.shift()! : this._queue[0]!
+    if (answers instanceof Error) throw answers
+    return new DecisionResponse(answers, 'mock-s1-1.0', { inputTokens: 10, outputTokens: 2, totalTokens: 12 })
   }
 }
 

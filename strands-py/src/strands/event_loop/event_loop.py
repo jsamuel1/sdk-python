@@ -51,6 +51,7 @@ from ..types.streaming import StopReason
 from ..types.tools import ToolResult, ToolUse
 from ._recover_message_on_max_tokens_reached import recover_message_on_max_tokens_reached
 from ._retry import ModelRetryStrategy
+from ._synthesized import synthesized_source
 from .streaming import stream_messages
 
 if TYPE_CHECKING:
@@ -627,6 +628,11 @@ async def _handle_model_execution(
             stop_reason, message, usage, metrics = last_event["stop"]
 
             invocation_state.setdefault("request_state", {})
+
+            if synthesized_source(message) is not None:
+                # Middleware produced this turn, not the model: keep its marking and fire no
+                # AfterModelCallEvent, so hooks never see a model response the model did not generate.
+                break
 
             # Attach metadata to the assistant message immediately so it's
             # available to all downstream consumers (hooks, events, state).

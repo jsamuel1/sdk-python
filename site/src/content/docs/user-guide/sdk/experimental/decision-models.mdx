@@ -12,11 +12,13 @@ sourceLinks:
   - path: strands-py/src/strands/experimental/decisions/_logprobs.py
   - path: strands-py/src/strands/experimental/decisions/_guard.py
   - path: strands-py/src/strands/experimental/decisions/_tool.py
+  - path: strands-py/src/strands/experimental/decisions/_fast_path.py
   - path: strands-py/src/strands/models/typesafe.py
   - path: strands-py/src/strands/models/sagemaker_decision.py
   - path: strands-ts/src/experimental/decisions/decision-model.ts
   - path: strands-ts/src/experimental/decisions/schema.ts
   - path: strands-ts/src/experimental/decisions/decision-strategy.ts
+  - path: strands-ts/src/experimental/decisions/fast-path.ts
   - path: strands-ts/src/models/typesafe.ts
   - path: site/docs/examples/python/system_one/support_triage.py
   - path: site/docs/examples/python/system_one/mixture_of_models.py
@@ -41,7 +43,7 @@ model and the first provider. Any other decision model implements the same inter
 
 :::note[TypeScript coverage]
 TypeScript has `DecisionModel` (with `answerFromLogits`), the Zod schema helpers,
-`TypeSafeDecisionModel` (with `temperature` and `calibrated`), and `DecisionStrategy`.
+`TypeSafeDecisionModel` (with `temperature` and `calibrated`), `DecisionStrategy`, and `FastPath`.
 `LLMDecisionModel`, `SageMakerDecisionModel`, `DecisionAgent`, the graph helpers,
 `DecisionGuard`, `decision_tool`, and the raw `logits`/`extras` span attributes are
 Python-only for now. Logprob-derived probabilities belong to `LLMDecisionModel`, so they are
@@ -329,6 +331,7 @@ unsure. The more a decision must always happen, the further up this table it bel
 | Subagent or graph node | `DecisionAgent` plus `when_choice` edges, or `DecisionStrategy` | The workflow | Follows a `when_below` edge, or the router default |
 | Embedded guard | `DecisionGuard`, `decision_classifier` | Every tool call | Asks a person to confirm |
 | Tool | `decision_tool` | The LLM, mid-task | Probabilities go back to the LLM |
+| Fast path | `FastPath` | Your code, before every model call | The LLM takes the step |
 
 A tool is the only placement the LLM can skip. Do not use it for policy.
 
@@ -541,6 +544,56 @@ growth against a source that says 4%:
 If the decision service fails, the tool returns an error result that names only the
 error type. The details go to the log, not to the LLM.
 
+### Fast path: serve a known next step without the LLM
+
+In a tool loop such as browser use, many steps are one of a few known actions. `FastPath`
+asks one `Choice` over those actions plus `other` before each model call. At or above
+`min_confidence` it skips the LLM for that step and emits the action's tool call, and the
+tool then runs as usual, so tool hooks, interventions such as `DecisionGuard`, and tool spans
+still apply. On `other`, a below-floor answer, or a decision error, the LLM runs unchanged.
+
+`FastPath` needs `min_confidence` and a calibrated model, because without a floor it would
+drive the agent open-loop. `max_consecutive` (default 3) forces an LLM turn after that many
+synthesized steps in a row. A step whose tool is not offered, or whose tool choice is forced
+(for example structured output), always goes to the LLM.
+
+<Tabs>
+  <Tab label="Python">
+```python
+from strands import Agent
+from strands.experimental.decisions import FastPath, ToolCall
+from strands.models import TypeSafeDecisionModel
+
+fast_path = FastPath(
+    TypeSafeDecisionModel(),
+    actions={
+        "click_submit": ToolCall("click", {"selector": "#submit"}),
+        "scroll_down": ToolCall("scroll", {"dy": 600}, description="Scroll one screen down"),
+    },
+    min_confidence=0.8,
+)
+agent = Agent(tools=[click, scroll], plugins=[fast_path])
+```
+  </Tab>
+  <Tab label="TypeScript">
+```typescript
+--8<-- "user-guide/sdk/experimental/decision-models_imports.ts:fast_path_imports"
+
+--8<-- "user-guide/sdk/experimental/decision-models.ts:fast_path"
+```
+  </Tab>
+</Tabs>
+
+The decision model sees the latest request, the system prompt, and the latest tool result,
+each bounded. A synthesized step is recorded as synthesized, never as model output:
+
+- The assistant message carries `metadata.custom.strands = {"source": "decision",
+  "decision_model": ..., "confidence": ...}`. Metadata is never sent to a model and is kept
+  by session managers.
+- Its `toolUseId` starts with `s1-`.
+- The cycle has a `decision` span with `strands.fast_path.action` in place of a `chat` span.
+- No `AfterModelCallEvent` fires for it, and it adds no LLM tokens to usage.
+
 ## Keep facts in code
 
 A decision model judges meaning. It does not know your permissions, budgets, or which
@@ -576,7 +629,7 @@ the same cases.
 |---|---|---|
 | `support_triage.py` | Multi-agent routing and handoff | Front door, graph node |
 | `mixture_of_models.py` | Model selection | Embedded strategy |
-| `browser_next_action.py` | Browser use: next element, goal reached | Front door with escalation |
+| `browser_next_action.py` | Browser use: next element, goal reached | Front door with escalation; fast path (`--fast-path`) |
 | `guardrails.py` | Tool-call guard and citation check | Embedded guard, tool |
 
 Each sample prints accuracy on its labeled cases, p50 decision latency (the maximum stands in
@@ -638,6 +691,23 @@ the plain billing ticket to billing at 0.81, where Kev-4B had fallen back. It es
 step, the $19 cart page, and took the meeting-room step on the fast path at 0.74 where Jev
 escalated at 0.58. Tune thresholds on each engine separately. The same number does not mean the
 same thing on Kev and Jev.
+
+`browser_next_action.py --fast-path` runs `FastPath` inside an agent loop: Haiku 4.5 shops on a
+simulated store with `search` and `click` tools, and each task runs twice, all-LLM and with
+`FastPath` over four fixed controls (close the popup, open the cart, check out, place the order).
+Code checks success: exactly the requested item was ordered. One Jev run on 2026-09-28, with a 0.7
+floor:
+
+| Arm | Task success | Steps | Served by System One | Cost | Wall time |
+|---|---|---|---|---|---|
+| All-LLM | 3/3 | 18 | 0 (0%) | $0.0342 | 23.6 s |
+| `FastPath` | 3/3 | 18 | 9 (50%) | $0.0181 | 19.5 s |
+
+The decision model served three of the four fixed steps in each task, and the LLM took the
+fourth because `max_consecutive=3` forces an LLM turn after three synthesized steps in a row.
+The search query and the product choice under a price limit went to the LLM, as intended. Cost
+fell 47%: the LLM's tokens roughly halved, and the 21 decision requests cost $0.0005. A second
+run gave the same success, share served, and step counts.
 
 These are a handful of cases each, enough to show the behavior, not to compare accuracy.
 For that, see the [baseline](https://github.com/strands-agents/harness-sdk/blob/main/team/designs/0020-system-one-decision-models-baseline.md),

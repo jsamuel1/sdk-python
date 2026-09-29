@@ -687,6 +687,7 @@ export class Tracer {
       if (options.usage) this._setUsageAttributes(attributes, options.usage)
       if (options.responseModelId) attributes['gen_ai.response.model'] = options.responseModelId
       if (options.answers) attributes['strands.decision.answers'] = options.answers
+      if (options.attributes) Object.assign(attributes, options.attributes)
       this._endSpan(span, attributes, options.error)
     } catch (err) {
       logger.warn(`error=<${err}> | failed to end decision span`)

@@ -43,9 +43,11 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
 }
 
 
-def parse_args(description: str) -> argparse.Namespace:
-    """Parse the common ``--engine``, ``--llm-model``, ``--kev-url`` and ``--kev-model`` flags."""
+def parse_args(description: str, extra: Callable[[argparse.ArgumentParser], None] | None = None) -> argparse.Namespace:
+    """Parse the common ``--engine``, ``--llm-model``, ``--kev-url`` and ``--kev-model`` flags, plus ``extra``'s."""
     parser = argparse.ArgumentParser(description=description)
+    if extra is not None:
+        extra(parser)
     parser.add_argument("--engine", choices=["jev", "kev", "llm"], default="jev")
     parser.add_argument("--llm-model", default=DEFAULT_LLM, help="Bedrock model id for --engine llm")
     parser.add_argument(

@@ -184,6 +184,8 @@ export interface EndDecisionSpanOptions {
   usage?: Usage
   /** Per-question top answer and confidence, as `id=answer@confidence`. */
   answers?: string[]
+  /** Adapter-owned attributes, such as `strands.fast_path.action`. */
+  attributes?: Readonly<Record<string, AttributeValue>>
   /** Error that caused the decision to fail. */
   error?: Error
 }

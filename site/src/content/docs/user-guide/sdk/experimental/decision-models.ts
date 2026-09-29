@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { Agent, BedrockModel, ModelRouter, RoutingCandidate } from '@strands-agents/sdk'
-import { DecisionStrategy, choice, score, yesNo } from '@strands-agents/sdk/experimental'
+import { Agent, BedrockModel, ModelRouter, RoutingCandidate, tool } from '@strands-agents/sdk'
+import { DecisionStrategy, FastPath, ToolCall, choice, score, yesNo } from '@strands-agents/sdk/experimental'
 import { TypeSafeDecisionModel } from '@strands-agents/sdk/models/typesafe'
 
 async function firstQuestion(): Promise<void> {
@@ -49,5 +49,34 @@ function modelSelection(): Agent {
   return agent
 }
 
+const click = tool({
+  name: 'click',
+  description: 'Click an element',
+  inputSchema: z.object({ selector: z.string() }),
+  callback: ({ selector }) => `clicked ${selector}`,
+})
+const scroll = tool({
+  name: 'scroll',
+  description: 'Scroll the page',
+  inputSchema: z.object({ dy: z.number() }),
+  callback: ({ dy }) => `scrolled ${dy}`,
+})
+
+function fastPath(): Agent {
+  // --8<-- [start:fast_path]
+  const fastPath = new FastPath(
+    new TypeSafeDecisionModel(),
+    {
+      click_submit: new ToolCall('click', { selector: '#submit' }),
+      scroll_down: new ToolCall('scroll', { dy: 600 }, 'Scroll one screen down'),
+    },
+    { minConfidence: 0.8 }
+  )
+  const agent = new Agent({ tools: [click, scroll], plugins: [fastPath] })
+  // --8<-- [end:fast_path]
+  return agent
+}
+
 void firstQuestion
 void modelSelection
+void fastPath

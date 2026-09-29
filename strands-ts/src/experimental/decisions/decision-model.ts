@@ -1,6 +1,7 @@
 /**
  * The DecisionModel abstraction: a model that decides rather than generates.
  */
+import type { AttributeValue } from '@opentelemetry/api'
 import type { z } from 'zod'
 
 import { Tracer } from '../../telemetry/tracer.js'
@@ -86,6 +87,25 @@ export abstract class DecisionModel<TConfig extends DecisionModelConfig = Decisi
     questions: Readonly<Record<string, Question>>,
     options: AskOptions = {}
   ): Promise<DecisionResponse> {
+    return this._tracedAsk(state, questions, options)
+  }
+
+  /**
+   * `ask`, plus adapter-owned attributes derived from the response and recorded on the decision span.
+   *
+   * @param state - The data to decide about
+   * @param questions - Question id to question
+   * @param options - Per-call options
+   * @param spanAttributes - Derives extra decision-span attributes from the validated response
+   * @returns The answers keyed like `questions`
+   * @internal
+   */
+  async _tracedAsk(
+    state: DecisionState,
+    questions: Readonly<Record<string, Question>>,
+    options: AskOptions = {},
+    spanAttributes?: (response: DecisionResponse) => Readonly<Record<string, AttributeValue>>
+  ): Promise<DecisionResponse> {
     const ids = Object.keys(questions)
     if (ids.length === 0) throw new Error('ask() needs at least one question')
     const empty = ids.filter((id) => {
@@ -114,6 +134,7 @@ export abstract class DecisionModel<TConfig extends DecisionModelConfig = Decisi
       usage: response.usage,
       answers: Object.entries(response.answers).map(([id, answer]) => summarize(id, answer)),
       ...(response.modelId !== undefined && { responseModelId: response.modelId }),
+      ...(spanAttributes && { attributes: spanAttributes(response) }),
     })
     return response
   }

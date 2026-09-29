@@ -102,7 +102,8 @@ import type { MemoryManagerConfig } from '../memory/index.js'
 import { SessionManager } from '../session/session-manager.js'
 import { Tracer } from '../telemetry/tracer.js'
 import { AgentMetrics, Meter } from '../telemetry/meter.js'
-import type { AttributeValue } from '@opentelemetry/api'
+import type { AttributeValue, Span } from '@opentelemetry/api'
+import { synthesizedSource } from './synthesized.js'
 import { logger } from '../logging/logger.js'
 import { CancelledError, CheckpointError } from '../errors.js'
 import { DefaultModelRetryStrategy } from '../retry/default-model-retry-strategy.js'
@@ -1647,7 +1648,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             assistantMessage = pendingExecution.assistantMessage
             completedToolResults = pendingExecution.completedToolResults
           } else {
-            const modelResult = yield* this._invokeModel(invocationState, structuredOutputChoice)
+            const modelResult = yield* this._invokeModel(invocationState, structuredOutputChoice, cycleSpan)
 
             if (modelResult.stopReason !== 'toolUse') {
               // Schema set, we already forced, and the model still refused.
@@ -2078,7 +2079,8 @@ export class Agent implements LocalAgent, InvokableAgent {
    */
   private async *_invokeModel(
     invocationState: InvocationState,
-    toolChoice?: ToolChoice
+    toolChoice?: ToolChoice,
+    cycleSpan: Span | null = null
   ): AsyncGenerator<AgentStreamEvent, StreamAggregatedResult, undefined> {
     const toolSpecs = this._toolRegistry.list().map((tool) => tool.toolSpec)
     const streamOptions: StreamOptions = { toolSpecs, modelState: this.modelState }
@@ -2166,7 +2168,8 @@ export class Agent implements LocalAgent, InvokableAgent {
           selectedModel,
           invokedModelRef,
           toolChoice,
-          projectedInputTokens
+          projectedInputTokens,
+          cycleSpan
         )
         const routedModel = this._modelRouter?.getRoutedModel(this, invocationState) ?? selectedModel
         const model = invokedModelRef.model ?? selectedModel
@@ -2182,6 +2185,12 @@ export class Agent implements LocalAgent, InvokableAgent {
 
         if (result.redaction?.userMessage) {
           this._redactLastMessage(result.redaction.userMessage)
+        }
+
+        // Middleware produced this turn, not the model: fire no AfterModelCallEvent, so hooks never see a model
+        // response the model did not generate.
+        if (synthesizedSource(result.message) !== undefined) {
+          return result
         }
 
         const stopData: ModelStopData = {
@@ -2260,7 +2269,8 @@ export class Agent implements LocalAgent, InvokableAgent {
     selectedModel: Model,
     invokedModelRef: InvokedModelRef,
     toolChoice?: ToolChoice,
-    projectedInputTokens?: number
+    projectedInputTokens?: number,
+    cycleSpan: Span | null = null
   ): AsyncGenerator<AgentStreamEvent, StreamAggregatedResult, undefined> {
     const context: InvokeModelContext = {
       agent: this,
@@ -2282,63 +2292,66 @@ export class Agent implements LocalAgent, InvokableAgent {
     // async function* doesn't bind lexical `this`; capture for the terminal callback.
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this
-    const middlewareResult = yield* this._middlewareRegistry.invoke(
-      InvokeModelStage,
-      context,
-      async function* (ctx: InvokeModelContext): AsyncGenerator<AgentStreamEvent, InvokeModelResult, undefined> {
-        invokedModelRef.model = ctx.model
-        const modelId = ctx.model.modelId
-        const modelSpan = self._tracer.startModelInvokeSpan({
-          messages: ctx.messages as Message[],
-          ...(modelId && { modelId }),
-          ...(ctx.systemPrompt !== undefined && { systemPrompt: ctx.systemPrompt }),
-        })
-
-        let modelSpanEnded = false
-        try {
-          // Wrap the snapshot into a StateStore for the model provider, which expects
-          // get/set methods.
-          tempModelState = new StateStore(modelStateSnapshot)
-          const streamOptions: StreamOptions = {
-            cancelSignal: self._abortSignal,
-            toolSpecs: ctx.toolSpecs as ToolSpec[],
-            modelState: tempModelState,
+    const middlewareResult = yield* this._inSpanContext(
+      cycleSpan,
+      this._middlewareRegistry.invoke(
+        InvokeModelStage,
+        context,
+        async function* (ctx: InvokeModelContext): AsyncGenerator<AgentStreamEvent, InvokeModelResult, undefined> {
+          invokedModelRef.model = ctx.model
+          const modelId = ctx.model.modelId
+          const modelSpan = self._tracer.startModelInvokeSpan({
+            messages: ctx.messages as Message[],
+            ...(modelId && { modelId }),
             ...(ctx.systemPrompt !== undefined && { systemPrompt: ctx.systemPrompt }),
-            ...(ctx.toolChoice && { toolChoice: ctx.toolChoice }),
-            // Omitted when zero, so an ordinary call's options are unchanged.
-            ...(ctx.dynamicTrailingBlocks ? { dynamicTrailingBlocks: ctx.dynamicTrailingBlocks } : {}),
-            ...(self.sessionManager ? { agentMetadata: { sessionId: self.sessionId } } : {}),
-          }
-          const gen = self._streamFromModel(ctx.model, ctx.messages as Message[], streamOptions, ctx.invocationState)
-          let iterResult = await gen.next()
-          while (!iterResult.done) {
-            yield iterResult.value
-            iterResult = await gen.next()
-          }
-
-          const usage = iterResult.value.metadata?.usage
-          const metrics = iterResult.value.metadata?.metrics
-          self._tracer.endModelInvokeSpan(modelSpan, {
-            output: iterResult.value.message,
-            stopReason: iterResult.value.stopReason,
-            ...(usage && { usage }),
-            ...(metrics && { metrics }),
           })
-          modelSpanEnded = true
 
-          return { result: iterResult.value }
-        } catch (error) {
-          self._tracer.endModelInvokeSpan(modelSpan, { error: normalizeError(error) })
-          modelSpanEnded = true
-          throw error
-        } finally {
-          // A consumer break closes this generator via .return(): finally runs but catch does not,
-          // so neither end call above fires and the span would stay open.
-          if (!modelSpanEnded) {
-            self._tracer.endModelInvokeSpan(modelSpan)
+          let modelSpanEnded = false
+          try {
+            // Wrap the snapshot into a StateStore for the model provider, which expects
+            // get/set methods.
+            tempModelState = new StateStore(modelStateSnapshot)
+            const streamOptions: StreamOptions = {
+              cancelSignal: self._abortSignal,
+              toolSpecs: ctx.toolSpecs as ToolSpec[],
+              modelState: tempModelState,
+              ...(ctx.systemPrompt !== undefined && { systemPrompt: ctx.systemPrompt }),
+              ...(ctx.toolChoice && { toolChoice: ctx.toolChoice }),
+              // Omitted when zero, so an ordinary call's options are unchanged.
+              ...(ctx.dynamicTrailingBlocks ? { dynamicTrailingBlocks: ctx.dynamicTrailingBlocks } : {}),
+              ...(self.sessionManager ? { agentMetadata: { sessionId: self.sessionId } } : {}),
+            }
+            const gen = self._streamFromModel(ctx.model, ctx.messages as Message[], streamOptions, ctx.invocationState)
+            let iterResult = await gen.next()
+            while (!iterResult.done) {
+              yield iterResult.value
+              iterResult = await gen.next()
+            }
+
+            const usage = iterResult.value.metadata?.usage
+            const metrics = iterResult.value.metadata?.metrics
+            self._tracer.endModelInvokeSpan(modelSpan, {
+              output: iterResult.value.message,
+              stopReason: iterResult.value.stopReason,
+              ...(usage && { usage }),
+              ...(metrics && { metrics }),
+            })
+            modelSpanEnded = true
+
+            return { result: iterResult.value }
+          } catch (error) {
+            self._tracer.endModelInvokeSpan(modelSpan, { error: normalizeError(error) })
+            modelSpanEnded = true
+            throw error
+          } finally {
+            // A consumer break closes this generator via .return(): finally runs but catch does not,
+            // so neither end call above fires and the span would stay open.
+            if (!modelSpanEnded) {
+              self._tracer.endModelInvokeSpan(modelSpan)
+            }
           }
         }
-      }
+      )
     )
 
     // Sync model state after the entire middleware chain has completed, so no
@@ -2349,6 +2362,30 @@ export class Agent implements LocalAgent, InvokableAgent {
     }
 
     return middlewareResult.result
+  }
+
+  /**
+   * Drive `gen` with `span` as the active OpenTelemetry context, so spans middleware starts (a decision span, for
+   * example) parent to it.
+   *
+   * @param span - The span to activate, or null to run in the current context
+   * @param gen - The generator to drive
+   * @returns The generator's return value
+   */
+  private async *_inSpanContext<TEvent, TResult>(
+    span: Span | null,
+    gen: AsyncGenerator<TEvent, TResult, undefined>
+  ): AsyncGenerator<TEvent, TResult, undefined> {
+    try {
+      let next = await this._tracer.withSpanContext(span, () => gen.next())
+      while (!next.done) {
+        yield next.value
+        next = await this._tracer.withSpanContext(span, () => gen.next())
+      }
+      return next.value
+    } finally {
+      await gen.return(undefined as TResult)
+    }
   }
 
   /**
