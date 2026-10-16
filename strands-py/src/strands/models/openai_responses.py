@@ -64,7 +64,7 @@ from ._defaults import resolve_config_metadata  # noqa: E402
 from ._openai_bedrock import BedrockMantleConfig, resolve_bedrock_client_args  # noqa: E402
 from ._openai_cache import apply_cache_config  # noqa: E402
 from ._openai_errors import classify_openai_error  # noqa: E402
-from ._validation import validate_config_keys  # noqa: E402
+from ._validation import _has_location_source, validate_config_keys  # noqa: E402
 from .model import BaseModelConfig, CacheConfig, Model  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -443,14 +443,16 @@ class OpenAIResponsesModel(Model):
                             if hasattr(event, "response"):
                                 if hasattr(event.response, "usage"):
                                     final_usage = event.response.usage
-                                # Check if stopped due to max_output_tokens
-                                if (
-                                    hasattr(event.response, "incomplete_details")
-                                    and event.response.incomplete_details
-                                    and getattr(event.response.incomplete_details, "reason", None)
-                                    == "max_output_tokens"
-                                ):
+                                # Check if stopped due to max_output_tokens or a content filter
+                                incomplete_reason = (
+                                    getattr(event.response.incomplete_details, "reason", None)
+                                    if getattr(event.response, "incomplete_details", None)
+                                    else None
+                                )
+                                if incomplete_reason == "max_output_tokens":
                                     stop_reason = "length"
+                                elif incomplete_reason == "content_filter":
+                                    stop_reason = "content_filter"
                             break
 
                         elif event.type == "response.completed":
@@ -488,11 +490,11 @@ class OpenAIResponsesModel(Model):
                 yield self._format_chunk({"chunk_type": "content_delta", "data_type": "tool", "data": tool_call})
                 yield self._format_chunk({"chunk_type": "content_stop", "data_type": "tool"})
 
-            # Determine finish reason: max_tokens (length) > tool_calls > normal stop.
+            # Determine finish reason: max_tokens (length) or content_filter > tool_calls > normal stop.
             # A function call that is still in flight when the response is cut off has truncated
-            # arguments, so it must surface as max_tokens rather than be executed.
-            if stop_reason == "length":
-                finish_reason = "length"
+            # arguments, so it must surface as the cut-off reason rather than be executed.
+            if stop_reason in ("length", "content_filter"):
+                finish_reason = stop_reason
             elif tool_calls:
                 finish_reason = "tool_calls"
             else:
@@ -657,12 +659,19 @@ class OpenAIResponsesModel(Model):
             if any("cachePoint" in content for content in contents):
                 logger.warning("cachePoint content block is not supported by OpenAI Responses | skipping")
 
-            formatted_contents = [
-                cls._format_request_message_content(content, role=role)
-                for content in contents
-                if not any(
+            filtered_contents = []
+            for content in contents:
+                if any(
                     block_type in content for block_type in ["toolResult", "toolUse", "reasoningContent", "cachePoint"]
-                )
+                ):
+                    continue
+                if _has_location_source(content):
+                    logger.warning("Location sources are not supported by OpenAI Responses | skipping content block")
+                    continue
+                filtered_contents.append(content)
+
+            formatted_contents = [
+                cls._format_request_message_content(content, role=role) for content in filtered_contents
             ]
 
             formatted_tool_calls = [
@@ -907,6 +916,8 @@ class OpenAIResponsesModel(Model):
                         return {"messageStop": {"stopReason": "tool_use"}}
                     case "length":
                         return {"messageStop": {"stopReason": "max_tokens"}}
+                    case "content_filter":
+                        return {"messageStop": {"stopReason": "content_filtered"}}
                     case _:
                         return {"messageStop": {"stopReason": "end_turn"}}
 
@@ -920,12 +931,12 @@ class OpenAIResponsesModel(Model):
 
                 if tokens_details := getattr(event["data"], "input_tokens_details", None):
                     cached = getattr(tokens_details, "cached_tokens", None)
-                    if isinstance(cached, int) and cached:
+                    if isinstance(cached, int):
                         usage_data["cacheReadInputTokens"] = cached
 
                     # Reported first-party from GPT-5.6
                     cache_write = getattr(tokens_details, "cache_write_tokens", None)
-                    if isinstance(cache_write, int) and cache_write:
+                    if isinstance(cache_write, int):
                         usage_data["cacheWriteInputTokens"] = cache_write
 
                 return {

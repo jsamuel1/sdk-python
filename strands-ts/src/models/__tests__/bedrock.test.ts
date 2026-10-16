@@ -737,6 +737,168 @@ describe('BedrockModel', () => {
       ])
     })
 
+    // Covers the strict_tools cases in strands-py test_bedrock.py, plus the TS-only
+    // unsupported-keyword warning.
+    describe('strictTools', () => {
+      const toolSpec = (inputSchema: object) => ({
+        name: 'calc',
+        description: 'Calculator',
+        inputSchema,
+      })
+      const lastTools = () => {
+        const call = vi.mocked(ConverseStreamCommand).mock.lastCall?.[0]
+        return (call?.toolConfig?.tools ?? []) as Array<{
+          toolSpec?: { name?: string; description?: string; strict?: boolean; inputSchema?: { json?: unknown } }
+        }>
+      }
+
+      it('injects strict: true and closes the schema when strictTools is true', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(
+          provider.stream(messages, {
+            toolSpecs: [toolSpec({ type: 'object', properties: { a: { type: 'string' } } })],
+          })
+        )
+
+        expect(lastTools()[0]!.toolSpec).toStrictEqual({
+          name: 'calc',
+          description: 'Calculator',
+          inputSchema: {
+            json: { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: false },
+          },
+          strict: true,
+        })
+        expect(warnOnce).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining('strict mode rejects'))
+      })
+
+      it('does not mutate the caller-provided input schema', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const inputSchema = { type: 'object', properties: { a: { type: 'string' } } }
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(provider.stream(messages, { toolSpecs: [toolSpec(inputSchema)] }))
+
+        expect(lastTools()[0]!.toolSpec!.inputSchema!.json).toHaveProperty('additionalProperties', false)
+        expect('additionalProperties' in inputSchema).toBe(false)
+      })
+
+      it('preserves an existing additionalProperties: true', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(
+          provider.stream(messages, {
+            toolSpecs: [
+              toolSpec({ type: 'object', properties: { a: { type: 'string' } }, additionalProperties: true }),
+            ],
+          })
+        )
+
+        expect(lastTools()[0]!.toolSpec!.inputSchema!.json).toEqual({
+          type: 'object',
+          properties: { a: { type: 'string' } },
+          additionalProperties: true,
+        })
+        expect(warnOnce).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining('tool=<calc>, keywords=<additionalProperties> | tool schema uses keywords')
+        )
+      })
+
+      it('warns with the tool name and keywords when a schema uses bounds', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(
+          provider.stream(messages, {
+            toolSpecs: [toolSpec({ type: 'object', properties: { n: { type: 'integer', minimum: 0, maximum: 9 } } })],
+          })
+        )
+
+        expect(warnOnce).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining('tool=<calc>, keywords=<maximum,minimum> | tool schema uses keywords')
+        )
+      })
+
+      it('patches nested object schemas', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(
+          provider.stream(messages, {
+            toolSpecs: [
+              toolSpec({
+                type: 'object',
+                properties: { outer: { type: 'object', properties: { inner: { type: 'string' } } } },
+              }),
+            ],
+          })
+        )
+
+        expect(lastTools()[0]!.toolSpec!.inputSchema!.json).toEqual({
+          type: 'object',
+          properties: {
+            outer: { type: 'object', properties: { inner: { type: 'string' } }, additionalProperties: false },
+          },
+          additionalProperties: false,
+        })
+      })
+
+      it('omits strict and leaves the schema unchanged by default', () => {
+        const provider = new BedrockModel()
+        const inputSchema = { type: 'object', properties: { a: { type: 'string' } } }
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(provider.stream(messages, { toolSpecs: [toolSpec(inputSchema)] }))
+
+        const spec = lastTools()[0]!.toolSpec!
+        expect(spec.strict).toBeUndefined()
+        expect(spec.inputSchema!.json).toEqual(inputSchema)
+      })
+
+      it('omits strict when strictTools is false', () => {
+        const provider = new BedrockModel({ strictTools: false })
+        const inputSchema = { type: 'object', properties: { a: { type: 'string' } } }
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(provider.stream(messages, { toolSpecs: [toolSpec(inputSchema)] }))
+
+        const spec = lastTools()[0]!.toolSpec!
+        expect(spec.strict).toBeUndefined()
+        expect(spec.inputSchema!.json).toEqual(inputSchema)
+      })
+
+      it('applies strict to every tool when multiple tool specs are given', () => {
+        const provider = new BedrockModel({ strictTools: true })
+        const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+        collectIterator(
+          provider.stream(messages, {
+            toolSpecs: [
+              toolSpec({ type: 'object', properties: { a: { type: 'string' } } }),
+              { name: 'other', description: 'Other', inputSchema: { type: 'object', properties: {} } },
+            ],
+          })
+        )
+
+        expect(lastTools()).toStrictEqual([
+          {
+            toolSpec: {
+              name: 'calc',
+              description: 'Calculator',
+              inputSchema: {
+                json: { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: false },
+              },
+              strict: true,
+            },
+          },
+          {
+            toolSpec: {
+              name: 'other',
+              description: 'Other',
+              inputSchema: { json: { type: 'object', properties: {}, additionalProperties: false } },
+              strict: true,
+            },
+          },
+        ])
+      })
+    })
+
     it('formats reasoning messages properly', async () => {
       const provider = new BedrockModel()
       const messages = [
@@ -1515,6 +1677,62 @@ describe('BedrockModel', () => {
         expect(metadataEvent.usage?.cacheReadInputTokens).toBe(80)
         expect(metadataEvent.usage?.cacheWriteInputTokens).toBe(20)
       }
+    })
+
+    it('handles cache usage metrics in non-streaming mode', async () => {
+      const mockSend = vi.fn(async () => ({
+        output: { message: { role: 'assistant', content: [{ text: 'Hello' }] } },
+        stopReason: 'end_turn',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+          cacheReadInputTokens: 80,
+          cacheWriteInputTokens: 20,
+        },
+        metrics: { latencyMs: 100 },
+      }))
+      mockBedrockClientImplementation({ send: mockSend })
+
+      const provider = new BedrockModel({ stream: false })
+      const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+
+      const events = await collectIterator(provider.stream(messages))
+
+      const metadataEvent = events.find((e) => e.type === 'modelMetadataEvent')
+      expect(metadataEvent).toEqual({
+        type: 'modelMetadataEvent',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+          cacheReadInputTokens: 80,
+          cacheWriteInputTokens: 20,
+        },
+        metrics: { latencyMs: 100 },
+      })
+    })
+
+    it('omits cache counters in non-streaming mode when usage does not report them', async () => {
+      const mockSend = vi.fn(async () => ({
+        output: { message: { role: 'assistant', content: [{ text: 'Hello' }] } },
+        stopReason: 'end_turn',
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        metrics: { latencyMs: 100 },
+      }))
+      mockBedrockClientImplementation({ send: mockSend })
+
+      const provider = new BedrockModel({ stream: false })
+      const messages = [new Message({ role: 'user', content: [new TextBlock('Hello')] })]
+
+      const events = await collectIterator(provider.stream(messages))
+
+      const metadataEvent = events.find((e) => e.type === 'modelMetadataEvent')
+      expect(metadataEvent).toEqual({
+        type: 'modelMetadataEvent',
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        metrics: { latencyMs: 100 },
+      })
     })
 
     it('handles trace in metadata', async () => {

@@ -15,6 +15,9 @@ describe('getContextWindowLimit', () => {
     expect(getContextWindowLimit('amazon.nova-micro-v1:0')).toBe(128_000)
     // OpenAI
     expect(getContextWindowLimit('gpt-6-astra')).toBe(1_050_000)
+    expect(getContextWindowLimit('gpt-6.1-sol')).toBe(1_050_000)
+    expect(getContextWindowLimit('gpt-6-sol')).toBe(1_050_000)
+    expect(getContextWindowLimit('gpt-6-luna')).toBe(1_050_000)
     expect(getContextWindowLimit('gpt-5.4')).toBe(1_050_000)
     expect(getContextWindowLimit('gpt-4o')).toBe(128_000)
     expect(getContextWindowLimit('o3')).toBe(200_000)
@@ -22,6 +25,24 @@ describe('getContextWindowLimit', () => {
     // Gemini
     expect(getContextWindowLimit('gemini-2.5-flash')).toBe(1_048_576)
     expect(getContextWindowLimit('gemini-2.5-pro')).toBe(1_048_576)
+  })
+
+  it('returns 1M for the current-generation Anthropic models', () => {
+    // Guards against the 1M-context 5.5 / 5.1 models resolving to undefined (#4692),
+    // which silently disables proactive compression and reports a wrong utilization.
+    expect(getContextWindowLimit('claude-sonnet-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('claude-opus-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('claude-fable-5-1')).toBe(1_000_000)
+    expect(getContextWindowLimit('anthropic.claude-sonnet-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('anthropic.claude-opus-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('anthropic.claude-fable-5-1')).toBe(1_000_000)
+    expect(getContextWindowLimit('global.anthropic.claude-opus-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('us.anthropic.claude-fable-5-1')).toBe(1_000_000)
+    // Claude Haiku 5.5 has the same 1M window (#4996).
+    expect(getContextWindowLimit('claude-haiku-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('anthropic.claude-haiku-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('eu.anthropic.claude-haiku-5-5')).toBe(1_000_000)
+    expect(getContextWindowLimit('global.anthropic.claude-haiku-5-5')).toBe(1_000_000)
   })
 
   it('strips Bedrock cross-region prefix before lookup', () => {
