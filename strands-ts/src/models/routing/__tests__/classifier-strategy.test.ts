@@ -595,7 +595,7 @@ describe('ClassifierStrategy', () => {
           type: 'toolUseBlock',
           name: STRUCTURED_OUTPUT_TOOL_NAME,
           toolUseId: 'classification',
-          input: { selectedCandidateIndex: 1 },
+          input: { [QUESTION_ID]: { answer: candidateKey(1) } },
         },
         { usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 } }
       ) as ClassifierModel

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
 import { Agent } from '../../../agent/agent.js'
+import { InvocationContextImpl } from '../../../agent/invocation-context.js'
 import { DecisionModel } from '../../../decisions/decision-model.js'
 import { Uncertain } from '../../../decisions/types.js'
 import { logger } from '../../../logging/logger.js'
@@ -21,6 +22,7 @@ class FakeDecisionModel extends DecisionModel {
   readonly questions: Record<string, Question>[] = []
   readonly options: AskOptions[] = []
   delayMs = 0
+  usage: DecisionResult['usage']
 
   constructor(private readonly _answer: Answer) {
     super()
@@ -36,7 +38,11 @@ class FakeDecisionModel extends DecisionModel {
     this.options.push(options)
     if (this.delayMs > 0) await abortableDelay(this.delayMs, options.signal)
     if (this._answer instanceof Error) throw this._answer
-    return { answers: { [QUESTION_ID]: this._answer } as DecisionResult<Q>['answers'], metadata: { latencyMs: 1 } }
+    return {
+      answers: { [QUESTION_ID]: this._answer } as DecisionResult<Q>['answers'],
+      ...(this.usage !== undefined && { usage: this.usage }),
+      metadata: { latencyMs: 1 },
+    }
   }
 }
 
@@ -245,6 +251,46 @@ describe('DecisionStrategy', () => {
         aborted: true,
         logged: expect.stringContaining('reason=<decision_timeout>, error_type=<TimeoutError>'),
       })
+    })
+  })
+
+  describe('request usage', () => {
+    it('adds the decision usage to the request total even when the request limit is used up', async () => {
+      const decisionModel = new FakeDecisionModel(candidateKey(1))
+      decisionModel.usage = { inputTokens: 4, outputTokens: 5, totalTokens: 9 }
+      const strategy = new DecisionStrategy(decisionModel)
+      const router = new ModelRouter([candidate('first'), candidate('second')], { strategy })
+      const invocationContext = new InvocationContextImpl({ turns: 1 })
+      invocationContext.usage.turnsTaken = 5
+
+      const selected = await strategy.select({ ...routingContext(router), invocationContext })
+
+      expect(selected).toBe(router.candidates[1])
+      expect(invocationContext.usage).toEqual({ turnsTaken: 5, inputTokens: 4, outputTokens: 5, totalTokens: 9 })
+    })
+
+    it('adds nothing when the decision model reports no usage', async () => {
+      const strategy = new DecisionStrategy(new FakeDecisionModel(candidateKey(1)))
+      const router = new ModelRouter([candidate('first'), candidate('second')], { strategy })
+      const invocationContext = new InvocationContextImpl()
+
+      await strategy.select({ ...routingContext(router), invocationContext })
+
+      expect(invocationContext.usage).toEqual({ turnsTaken: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+    })
+
+    it('counts the routing decision in the agent result usage', async () => {
+      const decisionModel = new FakeDecisionModel(candidateKey(1))
+      decisionModel.usage = { inputTokens: 100, outputTokens: 7, totalTokens: 107 }
+      const router = new ModelRouter([candidate('routine'), candidate('complex')], {
+        strategy: new DecisionStrategy(decisionModel),
+      })
+      const agent = new Agent({ model: router, printer: false })
+
+      const result = await agent.invoke('hello')
+
+      expect(result.invocationContext?.usage.inputTokens).toBeGreaterThanOrEqual(100)
+      expect(result.invocationContext?.usage.outputTokens).toBeGreaterThanOrEqual(7)
     })
   })
 
