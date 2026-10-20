@@ -5,7 +5,7 @@ import { Agent } from '../../../agent/agent.js'
 import { InvocationContextImpl } from '../../../agent/invocation-context.js'
 import { logger } from '../../../logging/logger.js'
 import { STRUCTURED_OUTPUT_TOOL_NAME } from '../../../tools/structured-output-tool.js'
-import { DocumentBlock, ImageBlock, VideoBlock } from '../../../types/media.js'
+import { AudioBlock, DocumentBlock, ImageBlock, VideoBlock } from '../../../types/media.js'
 import {
   CachePointBlock,
   GuardContentBlock,
@@ -251,6 +251,23 @@ describe('ClassifierStrategy', () => {
       expect(receivedRequestText(classifier)).toBe(originalRequest)
       const serializedRequests = JSON.stringify(classifier.requests)
       expect(['payload', 'approved-secret'].some((secret) => serializedRequests.includes(secret))).toBe(false)
+    })
+
+    it('uses the latest audio-only request instead of stale text', async () => {
+      const classifier = selectionModel(0)
+      const strategy = new ClassifierStrategy(classifier)
+      const router = new ModelRouter([candidate('first'), candidate('second')], { strategy })
+      const messages = [
+        userMessage('Stale earlier request'),
+        new Message({
+          role: 'user',
+          content: [new AudioBlock({ format: 'wav', source: { bytes: new Uint8Array([1]) } })],
+        }),
+      ]
+
+      await strategy.select(routingContext(router, { messages }))
+
+      expect(receivedRequestText(classifier)).toBe('[Audio]')
     })
 
     it.each([

@@ -299,6 +299,9 @@ function requestText(message: Message, characterLimit: number): string | undefin
       case 'guardContentBlock':
         if (block.text !== undefined && block.text.text.trim().length > 0) parts.push('[Guarded content]')
         break
+      case 'audioBlock':
+        parts.push('[Audio]')
+        break
       case 'imageBlock':
         parts.push('[Image]')
         break
