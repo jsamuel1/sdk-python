@@ -5,7 +5,8 @@ import { Agent } from '../../../agent/agent.js'
 import { DecisionModel } from '../../../decisions/decision-model.js'
 import { Uncertain } from '../../../decisions/types.js'
 import { logger } from '../../../logging/logger.js'
-import { CachePointBlock, Message, TextBlock } from '../../../types/messages.js'
+import { AudioBlock, DocumentBlock, ImageBlock, VideoBlock } from '../../../types/media.js'
+import { CachePointBlock, GuardContentBlock, Message, TextBlock } from '../../../types/messages.js'
 import { candidateKey, DecisionStrategy, QUESTION_ID } from '../decision-strategy.js'
 import { ModelRouter, RoutingCandidate } from '../router.js'
 import type { AskOptions, DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
@@ -83,6 +84,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+const bytes = new Uint8Array([1])
+
 describe('DecisionStrategy', () => {
   describe('select', () => {
     it('maps the answered positional key to the configured candidate instance', async () => {
@@ -137,6 +140,34 @@ describe('DecisionStrategy', () => {
         instructionsLength: 50,
         candidates: [{ key: candidateKey(0), name: 'a', metadata: { cost: 'low' } }, { key: candidateKey(1) }],
       })
+    })
+
+    it.each([
+      { name: 'audio', block: new AudioBlock({ format: 'wav', source: { bytes } }), expected: '[Audio]' },
+      { name: 'image', block: new ImageBlock({ format: 'png', source: { bytes } }), expected: '[Image]' },
+      {
+        name: 'document',
+        block: new DocumentBlock({ format: 'pdf', name: 'doc-secret', source: { bytes } }),
+        expected: '[Document]',
+      },
+      { name: 'video', block: new VideoBlock({ format: 'mp4', source: { bytes } }), expected: '[Video]' },
+      {
+        name: 'guarded image',
+        block: new GuardContentBlock({ image: { format: 'png', source: { bytes } } }),
+        expected: '[Guarded content]',
+      },
+    ])('routes a $name-only latest request by placeholder, not stale history', async ({ block, expected }) => {
+      const decisionModel = new FakeDecisionModel(candidateKey(0))
+      const strategy = new DecisionStrategy(decisionModel)
+      const router = new ModelRouter([candidate('a'), candidate('b')], { strategy })
+      const messages = [
+        new Message({ role: 'user', content: [new TextBlock('Stale earlier request')] }),
+        new Message({ role: 'user', content: [block] }),
+      ]
+
+      await strategy.select(routingContext(router, { messages }))
+
+      expect(sentState(decisionModel).latestRequest).toBe(expected)
     })
 
     it('bypasses the decision model for a single candidate', async () => {

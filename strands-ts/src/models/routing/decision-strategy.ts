@@ -6,7 +6,7 @@ import { Uncertain } from '../../decisions/types.js'
 import { normalizeError } from '../../errors.js'
 import { logger } from '../../logging/logger.js'
 import type { Question } from '../../decisions/types.js'
-import type { Message, SystemPrompt, TextBlock } from '../../types/messages.js'
+import type { ContentBlock, Message, SystemPrompt, TextBlock } from '../../types/messages.js'
 import type { JSONValue } from '../../types/json.js'
 import type { RoutingCandidate } from './router.js'
 import type { RoutingContext, RoutingStrategy } from './strategy.js'
@@ -288,31 +288,41 @@ function latestRequestText(messages: readonly Message[], characterLimit: number)
   return truncateText(NO_REQUEST_TEXT, characterLimit)
 }
 
+/** Projects one content block to safe routing text, or `undefined` when it carries no user request. */
+type BlockProjection<T extends ContentBlock['type']> = (block: Extract<ContentBlock, { type: T }>) => string | undefined
+
+const notRequestBearing = (): undefined => undefined
+
+/**
+ * Safe routing projection for every content block type. The mapped type makes a new block type a
+ * compile error here, so request-bearing content cannot silently fall back to stale history.
+ */
+const REQUEST_BLOCK_PROJECTIONS: { readonly [T in ContentBlock['type']]: BlockProjection<T> } = {
+  textBlock: (block) => (block.text.trim().length > 0 ? block.text : undefined),
+  guardContentBlock: (block) =>
+    block.image !== undefined || (block.text !== undefined && block.text.text.trim().length > 0)
+      ? '[Guarded content]'
+      : undefined,
+  audioBlock: () => '[Audio]',
+  imageBlock: () => '[Image]',
+  documentBlock: () => '[Document]',
+  videoBlock: () => '[Video]',
+  toolUseBlock: notRequestBearing,
+  toolResultBlock: notRequestBearing,
+  reasoningBlock: notRequestBearing,
+  cachePointBlock: notRequestBearing,
+  citationsBlock: notRequestBearing,
+}
+
+/** Project one block through its type's entry in {@link REQUEST_BLOCK_PROJECTIONS}. */
+function projectRequestBlock(block: ContentBlock): string | undefined {
+  const project = REQUEST_BLOCK_PROJECTIONS[block.type] as (block: ContentBlock) => string | undefined
+  return project(block)
+}
+
 /** Render only safe request-bearing fields from one user message. */
 function requestText(message: Message, characterLimit: number): string | undefined {
-  const parts: string[] = []
-  for (const block of message.content) {
-    switch (block.type) {
-      case 'textBlock':
-        if (block.text.trim().length > 0) parts.push(block.text)
-        break
-      case 'guardContentBlock':
-        if (block.text !== undefined && block.text.text.trim().length > 0) parts.push('[Guarded content]')
-        break
-      case 'audioBlock':
-        parts.push('[Audio]')
-        break
-      case 'imageBlock':
-        parts.push('[Image]')
-        break
-      case 'documentBlock':
-        parts.push('[Document]')
-        break
-      case 'videoBlock':
-        parts.push('[Video]')
-        break
-    }
-  }
+  const parts = message.content.map(projectRequestBlock).filter((part): part is string => part !== undefined)
   if (parts.length === 0) return undefined
   return truncateText(parts.join('\n'), characterLimit)
 }

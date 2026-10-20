@@ -253,21 +253,26 @@ describe('ClassifierStrategy', () => {
       expect(['payload', 'approved-secret'].some((secret) => serializedRequests.includes(secret))).toBe(false)
     })
 
-    it('uses the latest audio-only request instead of stale text', async () => {
+    it.each([
+      {
+        name: 'audio-only',
+        block: new AudioBlock({ format: 'wav', source: { bytes: new Uint8Array([1]) } }),
+        expected: '[Audio]',
+      },
+      {
+        name: 'guarded-image-only',
+        block: new GuardContentBlock({ image: { format: 'png', source: { bytes: new Uint8Array([1]) } } }),
+        expected: '[Guarded content]',
+      },
+    ])('uses the latest $name request instead of stale text', async ({ block, expected }) => {
       const classifier = selectionModel(0)
       const strategy = new ClassifierStrategy(classifier)
       const router = new ModelRouter([candidate('first'), candidate('second')], { strategy })
-      const messages = [
-        userMessage('Stale earlier request'),
-        new Message({
-          role: 'user',
-          content: [new AudioBlock({ format: 'wav', source: { bytes: new Uint8Array([1]) } })],
-        }),
-      ]
+      const messages = [userMessage('Stale earlier request'), new Message({ role: 'user', content: [block] })]
 
       await strategy.select(routingContext(router, { messages }))
 
-      expect(receivedRequestText(classifier)).toBe('[Audio]')
+      expect(receivedRequestText(classifier)).toBe(expected)
     })
 
     it.each([
@@ -279,15 +284,6 @@ describe('ClassifierStrategy', () => {
             content: [
               new ToolResultBlock({ toolUseId: 'tool-1', status: 'success', content: [new TextBlock('secret')] }),
             ],
-          }),
-        ],
-      },
-      {
-        name: 'guard block without text',
-        messages: [
-          new Message({
-            role: 'user',
-            content: [new GuardContentBlock({ image: { format: 'png', source: { bytes: new Uint8Array([1]) } } })],
           }),
         ],
       },
