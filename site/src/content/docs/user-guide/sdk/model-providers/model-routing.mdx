@@ -50,7 +50,7 @@ Choose the strategy that matches how your application should select and recover:
 | --- | --- |
 | Try candidates in order, then favor healthier candidates | Default `FallbackStrategy` |
 | Choose the opening candidate from the request and evidence | `ClassifierStrategy` |
-| Choose the opening candidate with any decision model | `DecisionStrategy` |
+| Choose the opening candidate with any decision | `DecisionStrategy` |
 | Define a custom candidate-selection policy | Custom `RoutingStrategy` |
 
 `ClassifierStrategy` does not select another candidate after the serving model
@@ -218,12 +218,12 @@ candidates.
 
 ## Route with a decision model
 
-Use `DecisionStrategy` when a decision model other than a general-purpose LLM
-should choose the opening candidate, such as a fine-tuned classifier, a rules
-engine, or a small local model. A decision model is any `DecisionModel` subclass
-that answers closed questions; `LLMDecisionModel` wraps a regular model. The
-strategy asks the decision model one closed question and maps the answer back to a
-candidate.
+Use `DecisionStrategy` when you want routing posed as a structured, closed
+question so that any decision maker can answer it effectively. The answer can
+come from `LLMDecisionModel`, which wraps a regular model, or from any other
+`DecisionModel` subclass, such as a fine-tuned classifier, a rules engine, or a
+small local model. The strategy asks one closed question over the candidate keys
+and maps the answer back to a candidate.
 
 :::note
 `DecisionStrategy` is currently available in the TypeScript SDK only. Python
