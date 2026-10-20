@@ -15,9 +15,9 @@ import {
   type Question,
 } from '@strands-agents/sdk'
 
-const CLASSIFIER_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
-const ROUTINE_MODEL_ID = 'us.amazon.nova-lite-v1:0'
-const ADVANCED_MODEL_ID = 'us.amazon.nova-pro-v1:0'
+const CLASSIFIER_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
+const ROUTINE_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
+const ADVANCED_MODEL_ID = 'global.anthropic.claude-opus-5'
 
 const ROUTINE_REQUEST = 'What is the capital of France? Answer in one word.'
 const ADVANCED_REQUEST =

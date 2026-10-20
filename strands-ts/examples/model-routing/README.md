@@ -4,7 +4,7 @@ Runs `ModelRouter` with `ClassifierStrategy` and `DecisionStrategy` against real
 
 | Scenario | What it checks |
 |----------|----------------|
-| 1. `ClassifierStrategy` | The existing constructor and options still work. A routine request is served by Nova Lite and a design request by Nova Pro. |
+| 1. `ClassifierStrategy` | The existing constructor and options still work. A routine request is served by Claude Haiku 5.5 and a design request by Claude Opus 5. |
 | 2. `DecisionStrategy` + `LLMDecisionModel` | Routing works with a general-purpose LLM as the decision model. |
 | 3. `DecisionStrategy` + custom `DecisionModel` | A local keyword model routes without making a classifier call. The script prints the question (positional keys `c0`, `c1`) and the bounded JSON state the decision model receives. |
 | 4. Timeout | A decision model that never answers is aborted through `cancelSignal`, and the router serves candidate `c0`. |
@@ -12,7 +12,7 @@ Runs `ModelRouter` with `ClassifierStrategy` and `DecisionStrategy` against real
 ## Prerequisites
 
 - Node.js 22+
-- AWS credentials with Bedrock access to `us.anthropic.claude-haiku-4-5-20251001-v1:0`, `us.amazon.nova-lite-v1:0`, and `us.amazon.nova-pro-v1:0`
+- AWS credentials with Bedrock access to `global.anthropic.claude-haiku-5-5` and `global.anthropic.claude-opus-5`
 
 ## Run
 

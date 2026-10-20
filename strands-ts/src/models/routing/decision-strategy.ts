@@ -78,6 +78,8 @@ export interface DecisionStrategyOptions {
   /**
    * Maximum milliseconds to wait for the decision. Defaults to 30000. On timeout the in-flight call is
    * aborted through its cancel signal, which is honored implementation- and provider-dependently.
+   * The timeout runs independently of agent cancellation: {@link RoutingContext} carries no cancel
+   * signal, so cancelling the agent while a decision is in flight does not abort that decision.
    */
   readonly timeoutMs?: number
   /** Maximum characters copied from the latest request into the routing context. Defaults to 4000. */

@@ -45,7 +45,8 @@ export interface ClassifierStrategyOptions {
   /**
    * Maximum milliseconds to wait for classification. Defaults to 30000. The timeout bounds how long
    * selection waits, not the classifier request itself: the in-flight call is aborted through its
-   * cancel signal, which is honored provider-dependently.
+   * cancel signal, which is honored provider-dependently. The timeout runs independently of agent
+   * cancellation: cancelling the agent while classification is in flight does not abort it.
    */
   readonly timeoutMs?: number
   /** Maximum characters copied from the latest request into the routing context. Defaults to 4000. */

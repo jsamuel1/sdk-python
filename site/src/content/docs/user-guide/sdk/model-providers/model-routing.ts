@@ -153,12 +153,12 @@ async function modelRoutingDecisionStrategy() {
   const router = new ModelRouter(
     [
       new RoutingCandidate({
-        model: new BedrockModel({ modelId: 'us.amazon.nova-lite-v1:0' }),
+        model: new BedrockModel({ modelId: 'global.anthropic.claude-haiku-5-5' }),
         name: 'routine',
         description: 'Concise factual questions and routine requests.',
       }),
       new RoutingCandidate({
-        model: new BedrockModel({ modelId: 'us.amazon.nova-pro-v1:0' }),
+        model: new BedrockModel({ modelId: 'global.anthropic.claude-opus-5' }),
         name: 'advanced',
         description: 'Systems design with several interacting constraints.',
       }),
