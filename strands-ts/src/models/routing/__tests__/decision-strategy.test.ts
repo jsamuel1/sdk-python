@@ -33,7 +33,7 @@ class FakeDecisionModel extends DecisionModel {
     this.states.push(state)
     this.questions.push(questions)
     this.options.push(options)
-    if (this.delayMs > 0) await abortableDelay(this.delayMs, options.cancelSignal)
+    if (this.delayMs > 0) await abortableDelay(this.delayMs, options.signal)
     if (this._answer instanceof Error) throw this._answer
     return { answers: { [QUESTION_ID]: this._answer } as DecisionResult<Q>['answers'], metadata: { latencyMs: 1 } }
   }
@@ -207,7 +207,7 @@ describe('DecisionStrategy', () => {
 
       expect({
         selected,
-        aborted: decisionModel.options[0]?.cancelSignal?.aborted,
+        aborted: decisionModel.options[0]?.signal?.aborted,
         logged: String(warn.mock.calls[0]![0]),
       }).toEqual({
         selected: undefined,

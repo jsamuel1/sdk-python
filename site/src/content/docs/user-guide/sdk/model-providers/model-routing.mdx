@@ -259,7 +259,7 @@ The decision model receives two inputs:
 The question sets `uncertainty` to `false`, so the decision model must commit to one
 key. An unknown key, an error, or a call that runs past `timeoutMs` logs a warning
 and declines, and the router serves the first candidate. A timeout also aborts the
-in-flight call through the `cancelSignal` that `DecisionModel.ask` passes to the
+in-flight call through the abort `signal` that `DecisionModel.ask` passes to the
 implementation.
 
 ## Build a custom routing strategy

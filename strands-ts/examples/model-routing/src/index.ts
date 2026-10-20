@@ -16,7 +16,10 @@ import {
 } from '@strands-agents/sdk'
 
 const CLASSIFIER_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
-const ROUTINE_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
+/** Small open-weight model that answers the routing question in scenario 2. */
+const DECISION_MODEL_ID = 'mistral.ministral-3-8b-instruct'
+/** Small open-weight model that serves routine requests. */
+const ROUTINE_MODEL_ID = 'openai.gpt-oss-20b-1:0'
 const ADVANCED_MODEL_ID = 'global.anthropic.claude-opus-5'
 
 const ROUTINE_REQUEST = 'What is the capital of France? Answer in one word.'
@@ -53,7 +56,7 @@ class SlowDecisionModel extends DecisionModel {
     options: AskOptions
   ): Promise<DecisionResult<Q>> {
     return new Promise((_resolve, reject) => {
-      options.cancelSignal?.addEventListener('abort', () => {
+      options.signal?.addEventListener('abort', () => {
         this.aborted = true
         reject(new Error('decision aborted'))
       })
@@ -96,9 +99,12 @@ function report(label: string, actual: string, expected: string): boolean {
 }
 
 async function main(): Promise<void> {
-  const routine = new BedrockModel({ modelId: ROUTINE_MODEL_ID, maxTokens: 256 })
-  const advanced = new BedrockModel({ modelId: ADVANCED_MODEL_ID, maxTokens: 512 })
-  const classifierModel = new BedrockModel({ modelId: CLASSIFIER_MODEL_ID, maxTokens: 64, temperature: 0 })
+  // gpt-oss and Claude Opus 5 both emit reasoning before their answer, so they need headroom beyond the reply.
+  const routine = new BedrockModel({ modelId: ROUTINE_MODEL_ID, maxTokens: 2048 })
+  const advanced = new BedrockModel({ modelId: ADVANCED_MODEL_ID, maxTokens: 8192 })
+  // Claude Haiku 5.5 rejects `temperature`, so the classifier relies on the model default.
+  const classifierModel = new BedrockModel({ modelId: CLASSIFIER_MODEL_ID, maxTokens: 64 })
+  const decisionModel = new BedrockModel({ modelId: DECISION_MODEL_ID, maxTokens: 64, temperature: 0 })
   const results: boolean[] = []
 
   console.log('\n=== 1. ClassifierStrategy (existing API, now a DecisionStrategy preset) ===')
@@ -108,9 +114,9 @@ async function main(): Promise<void> {
   results.push(report('routine request', await servedBy(classifier, ROUTINE_REQUEST), ROUTINE_MODEL_ID))
   results.push(report('advanced request', await servedBy(classifier, ADVANCED_REQUEST), ADVANCED_MODEL_ID))
 
-  console.log('\n=== 2. DecisionStrategy + LLMDecisionModel ===')
+  console.log('\n=== 2. DecisionStrategy + LLMDecisionModel over a small open-weight model ===')
   const llmDecision = new ModelRouter(candidates(routine, advanced), {
-    strategy: new DecisionStrategy(new LLMDecisionModel({ model: classifierModel }), { timeoutMs: 15_000 }),
+    strategy: new DecisionStrategy(new LLMDecisionModel({ model: decisionModel }), { timeoutMs: 15_000 }),
   })
   results.push(report('advanced request', await servedBy(llmDecision, ADVANCED_REQUEST), ADVANCED_MODEL_ID))
 

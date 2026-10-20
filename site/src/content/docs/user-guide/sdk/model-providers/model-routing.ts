@@ -7,7 +7,7 @@ import {
   FallbackStrategy,
   ModelRouter,
   RoutingCandidate,
-  type DecisionAskOptions,
+  type AskOptions,
   type DecisionInput,
   type DecisionResult,
   type Question,
@@ -136,7 +136,7 @@ async function modelRoutingDecisionStrategy() {
     protected async _ask<const Q extends Record<string, Question>>(
       state: DecisionInput,
       questions: Q,
-      _options: DecisionAskOptions
+      _options: AskOptions
     ): Promise<DecisionResult<Q>> {
       const startedAt = performance.now()
       const choices = questions['candidate']!.choices as readonly string[]

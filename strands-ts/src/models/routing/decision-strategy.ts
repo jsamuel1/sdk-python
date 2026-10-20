@@ -77,7 +77,7 @@ export interface DecisionStrategyOptions {
   readonly question?: string
   /**
    * Maximum milliseconds to wait for the decision. Defaults to 30000. On timeout the in-flight call is
-   * aborted through its cancel signal, which is honored implementation- and provider-dependently.
+   * aborted through its abort `signal`, which is honored implementation- and provider-dependently.
    * The timeout runs independently of agent cancellation: {@link RoutingContext} carries no cancel
    * signal, so cancelling the agent while a decision is in flight does not abort that decision.
    */
@@ -226,7 +226,7 @@ export class DecisionStrategy implements RoutingStrategy {
   private async _decide(
     context: RoutingContext,
     profiles: readonly CandidateProfile[],
-    cancelSignal: AbortSignal
+    signal: AbortSignal
   ): Promise<string | boolean | Uncertain> {
     const state = JSON.stringify({
       latestRequest: latestRequestText(context.messages, this._maxMessageChars),
@@ -238,7 +238,7 @@ export class DecisionStrategy implements RoutingStrategy {
       choices: profiles.map((profile) => profile.key),
       uncertainty: false,
     }
-    const result = await this._decisionModel.ask(state, { [QUESTION_ID]: question }, { cancelSignal })
+    const result = await this._decisionModel.ask(state, { [QUESTION_ID]: question }, { signal })
     return result.answers[QUESTION_ID]!
   }
 }

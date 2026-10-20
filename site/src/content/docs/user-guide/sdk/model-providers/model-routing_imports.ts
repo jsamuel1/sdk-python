@@ -35,7 +35,7 @@ import {
   DecisionStrategy,
   ModelRouter,
   RoutingCandidate,
-  type DecisionAskOptions,
+  type AskOptions,
   type DecisionInput,
   type DecisionResult,
   type Question,

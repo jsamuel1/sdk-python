@@ -105,7 +105,7 @@ export class LLMDecisionModel extends DecisionModel {
       systemPrompt,
       toolSpecs: [tool.toolSpec],
       toolChoice: { tool: { name: tool.name } },
-      ...(options.cancelSignal !== undefined && { cancelSignal: options.cancelSignal }),
+      ...(options.signal !== undefined && { cancelSignal: options.signal }),
     })
 
     let iteration = await stream.next()

@@ -170,12 +170,12 @@ describe('LLMDecisionModel', () => {
       expect(model.options[0]).not.toHaveProperty('cancelSignal')
     })
 
-    it('forwards the cancel signal to the model call', async () => {
+    it('forwards the abort signal to the model call as cancelSignal', async () => {
       const model = toolUseModel({ q: 'true' })
       const decision = new LLMDecisionModel({ model })
       const controller = new AbortController()
 
-      await decision.ask('x', { q: { question: 'ok?', choices: 'boolean' } }, { cancelSignal: controller.signal })
+      await decision.ask('x', { q: { question: 'ok?', choices: 'boolean' } }, { signal: controller.signal })
 
       expect(model.options[0]?.cancelSignal).toBe(controller.signal)
     })
