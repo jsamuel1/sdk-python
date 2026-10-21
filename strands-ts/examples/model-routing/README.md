@@ -2,12 +2,12 @@
 
 Runs `ModelRouter` with `ClassifierStrategy` and `DecisionStrategy` against real Bedrock models. Each scenario prints which model served the first call and whether that matches the expected candidate.
 
-| Scenario | What it checks |
-|----------|----------------|
-| 1. `ClassifierStrategy` | The existing constructor and options still work. Claude Haiku 5.5 classifies; a routine request is served by the small open-weight `gpt-oss-20b` and a design request by Claude Opus 5. |
-| 2. `DecisionStrategy` + `LLMDecisionModel` | Routing works when a small open-weight model (`ministral-3-8b-instruct`) answers the routing question through `LLMDecisionModel`. |
-| 3. `DecisionStrategy` + custom `DecisionModel` | A local keyword model routes without making a classifier call. The script prints the question (positional keys `c0`, `c1`) and the bounded JSON state the decision model receives. |
-| 4. Timeout | A decision model that never answers is aborted through its `signal`, and the router serves candidate `c0`. |
+| Scenario                                       | What it checks                                                                                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. `ClassifierStrategy`                        | The existing constructor and options still work. Claude Haiku 5.5 classifies; a routine request is served by the small open-weight `gpt-oss-20b` and a design request by Claude Opus 5. |
+| 2. `DecisionStrategy` + `LLMDecisionModel`     | Routing works when a small open-weight model (`ministral-3-8b-instruct`) answers the routing question through `LLMDecisionModel`.                                                       |
+| 3. `DecisionStrategy` + custom `DecisionModel` | A local keyword model routes without making a classifier call. The script prints the question (positional keys `c0`, `c1`) and the bounded JSON state the decision model receives.      |
+| 4. Timeout                                     | A decision model that never answers is aborted through its `signal`, and the router serves candidate `c0`.                                                                              |
 
 ## Prerequisites
 
