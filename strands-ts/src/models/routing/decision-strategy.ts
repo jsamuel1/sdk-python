@@ -1,7 +1,6 @@
 /**
  * Route among configured candidates by asking a decision model.
  */
-import { unwrapInvocationContext } from '../../agent/invocation-context.js'
 import { DecisionModel } from '../../decisions/decision-model.js'
 import { Uncertain } from '../../decisions/types.js'
 import { normalizeError } from '../../errors.js'
@@ -239,9 +238,12 @@ export class DecisionStrategy implements RoutingStrategy {
       choices: profiles.map((profile) => profile.key),
       uncertainty: false,
     }
-    const result = await this._decisionModel.ask(state, { [QUESTION_ID]: question }, { signal })
-    // Adds the decision's reported usage to the request; the request's limits don't gate routing.
-    if (result.usage !== undefined) unwrapInvocationContext(context.invocationContext)?.recordUsage(result.usage)
+    // `ask` adds the decision's reported usage to the request; the request's limits don't gate routing.
+    const result = await this._decisionModel.ask(
+      state,
+      { [QUESTION_ID]: question },
+      { signal, ...(context.invocationContext !== undefined && { invocationContext: context.invocationContext }) }
+    )
     return result.answers[QUESTION_ID]!
   }
 }
