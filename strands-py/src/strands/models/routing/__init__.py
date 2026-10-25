@@ -9,6 +9,7 @@ once a later call succeeds. The API is provisional and may change before it is f
 """
 
 from .classifier_strategy import ClassifierStrategy
+from .decision_strategy import DecisionStrategy
 from .fallback_strategy import FallbackStrategy
 from .router import CandidateInput, ModelRouter, RoutingCandidate
 from .strategy import RoutingAttempt, RoutingContext, RoutingStrategy
@@ -16,6 +17,7 @@ from .strategy import RoutingAttempt, RoutingContext, RoutingStrategy
 __all__ = [
     "CandidateInput",
     "ClassifierStrategy",
+    "DecisionStrategy",
     "FallbackStrategy",
     "ModelRouter",
     "RoutingAttempt",
