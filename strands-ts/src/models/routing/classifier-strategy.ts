@@ -4,7 +4,7 @@
 import { LLMDecisionModel } from '../../decisions/llm-decision-model.js'
 import { Model } from '../model.js'
 import { DecisionStrategy } from './decision-strategy.js'
-import type { DeclineLog } from './decision-strategy.js'
+import type { DecisionStrategyOptions, DecisionStrategyPresetOptions, DeclineLog } from './decision-strategy.js'
 
 const DEFAULT_SYSTEM_PROMPT =
   'You are a model-routing classifier. Select exactly one candidate for the latest human request. First identify ' +
@@ -35,30 +35,13 @@ const CLASSIFIER_DECLINE_LOG: DeclineLog = {
 }
 
 /** Options for constructing a {@link ClassifierStrategy}. */
-export interface ClassifierStrategyOptions {
+export interface ClassifierStrategyOptions extends DecisionStrategyOptions {
   /**
    * Routing policy for the classifier, sent verbatim and never truncated. The SDK appends mandatory
    * routing, isolation, and structured-output rules that the policy cannot override.
    * Defaults to the SDK input-complexity policy.
    */
   readonly systemPrompt?: string
-  /**
-   * Maximum milliseconds to wait for classification. Defaults to 30000. The timeout bounds how long
-   * selection waits, not the classifier request itself: the in-flight call is aborted through its
-   * cancel signal, which is honored provider-dependently. The timeout runs independently of agent
-   * cancellation: cancelling the agent while classification is in flight does not abort it.
-   */
-  readonly timeoutMs?: number
-  /** Maximum characters copied from the latest request into the routing context. Defaults to 4000. */
-  readonly maxMessageChars?: number
-  /** Maximum characters copied from the parent agent's system prompt text into the routing context. Defaults to 4000. */
-  readonly maxAgentInstructionsChars?: number
-  /**
-   * Maximum aggregate characters for the serialized evidence (keys, names, descriptions, and metadata) of
-   * all candidates. Evidence is never truncated; selection throws when the budget is exceeded.
-   * Defaults to 4000.
-   */
-  readonly maxCandidateChars?: number
 }
 
 /**
@@ -90,8 +73,6 @@ export interface ClassifierStrategyOptions {
  * ```
  */
 export class ClassifierStrategy extends DecisionStrategy {
-  protected override readonly _declineLog: DeclineLog = CLASSIFIER_DECLINE_LOG
-
   /**
    * Create a classifier strategy.
    *
@@ -102,7 +83,8 @@ export class ClassifierStrategy extends DecisionStrategy {
    */
   constructor(model: Model, options: ClassifierStrategyOptions = {}) {
     if (!(model instanceof Model)) throw new TypeError('model must be a Model')
-    const { systemPrompt = DEFAULT_SYSTEM_PROMPT, ...strategyOptions } = options
+    const { systemPrompt = DEFAULT_SYSTEM_PROMPT, ...limits } = options
+    const strategyOptions: DecisionStrategyPresetOptions = { ...limits, declineLog: CLASSIFIER_DECLINE_LOG }
     super(new LLMDecisionModel({ model, systemPrompt: `${systemPrompt}\n\n${ROUTING_RULES}` }), strategyOptions)
   }
 }

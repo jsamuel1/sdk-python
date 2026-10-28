@@ -36,7 +36,7 @@ class KeywordDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    _options: AskOptions
+    _options: Pick<AskOptions, 'cancelSignal'>
   ): Promise<DecisionResult<Q>> {
     this.lastState = state
     this.lastQuestions = questions
@@ -53,10 +53,10 @@ class SlowDecisionModel extends DecisionModel {
   protected _ask<const Q extends Record<string, Question>>(
     _state: DecisionInput,
     _questions: Q,
-    options: AskOptions
+    options: Pick<AskOptions, 'cancelSignal'>
   ): Promise<DecisionResult<Q>> {
     return new Promise((_resolve, reject) => {
-      options.signal?.addEventListener('abort', () => {
+      options.cancelSignal?.addEventListener('abort', () => {
         this.aborted = true
         reject(new Error('decision aborted'))
       })

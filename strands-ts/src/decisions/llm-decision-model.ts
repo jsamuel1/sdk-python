@@ -93,7 +93,7 @@ export class LLMDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    options: AskOptions
+    options: Pick<AskOptions, 'cancelSignal'>
   ): Promise<DecisionResult<Q>> {
     const schema = buildAnswerSchema(questions)
     const tool = new StructuredOutputTool(schema)
@@ -105,7 +105,7 @@ export class LLMDecisionModel extends DecisionModel {
       systemPrompt,
       toolSpecs: [tool.toolSpec],
       toolChoice: { tool: { name: tool.name } },
-      ...(options.signal !== undefined && { cancelSignal: options.signal }),
+      ...(options.cancelSignal !== undefined && { cancelSignal: options.cancelSignal }),
     })
 
     let iteration = await stream.next()
