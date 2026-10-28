@@ -19,6 +19,7 @@ import { candidateKey, QUESTION_ID } from '../decision-strategy.js'
 import { ModelRouter, RoutingCandidate } from '../router.js'
 import type { ModelStreamEvent } from '../../streaming.js'
 import type { StreamOptions } from '../../model.js'
+import type { ModelInfo } from '../../model-info.js'
 import type { SystemPrompt } from '../../../types/messages.js'
 import type { JSONValue } from '../../../types/json.js'
 import type { RoutingContext } from '../strategy.js'
@@ -50,6 +51,11 @@ class ConfigGuardModel extends MockMessageModel {
 
   override getConfig(): never {
     throw new Error('candidate configuration must not be read')
+  }
+
+  // The router's stateful check resolves modelInfo through getConfig(); the guard is for the classifier.
+  override get modelInfo(): ModelInfo {
+    return {}
   }
 }
 
