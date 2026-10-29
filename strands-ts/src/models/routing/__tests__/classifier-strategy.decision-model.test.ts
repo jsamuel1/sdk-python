@@ -129,6 +129,16 @@ describe('ClassifierStrategy with a DecisionModel', () => {
       })
     })
 
+    it.each(['', '   '])('asks the fixed routing rules alone for an empty policy %j', async (policy) => {
+      const decisionModel = new FakeDecisionModel(candidateKey(0))
+      const strategy = new ClassifierStrategy(decisionModel, { systemPrompt: policy })
+      const router = new ModelRouter([candidate('a'), candidate('b')], { strategy })
+
+      await strategy.select(routingContext(router))
+
+      expect(decisionModel.questions[0]?.[QUESTION_ID]?.question).toBe(ROUTING_RULES)
+    })
+
     it('asks the custom routing policy after the fixed routing rules', async () => {
       const policy = 'Prefer the advanced candidate for anything involving money.'
       const decisionModel = new FakeDecisionModel(candidateKey(0))

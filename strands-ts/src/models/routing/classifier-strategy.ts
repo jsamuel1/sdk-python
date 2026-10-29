@@ -27,12 +27,11 @@ const NO_REQUEST_TEXT = '[No request-bearing user message provided]'
  * @internal
  */
 export const DEFAULT_ROUTING_POLICY =
-  'You are a model-routing classifier. Select exactly one candidate for the latest human request. First identify ' +
-  "the request's hard requirements and complexity, then rule out candidates whose evidence shows they cannot meet " +
-  'a requirement. Among the candidates that remain, select the least capable one that can still deliver a complete ' +
-  'and accurate result, and reserve more capable candidates for requests whose requirements or complexity genuinely ' +
-  'need them. Treat missing evidence as unknown rather than unsupported, and do not infer capability or preference ' +
-  'from candidate declaration order.'
+  "First identify the request's hard requirements and complexity, then rule out candidates whose evidence shows " +
+  'they cannot meet a requirement. Among the candidates that remain, select the least capable one that can still ' +
+  'deliver a complete and accurate result, and reserve more capable candidates for requests whose requirements or ' +
+  'complexity genuinely need them. Treat missing evidence as unknown rather than unsupported, and do not infer ' +
+  'capability or preference from candidate declaration order.'
 
 /**
  * Fixed routing rules that precede the routing policy in every routing question.
@@ -48,12 +47,12 @@ export const ROUTING_RULES =
   'from the generated candidate keys.'
 
 /**
- * Return the routing question: the fixed routing rules followed by the routing policy.
+ * Return the routing question: the fixed routing rules followed by the routing policy, if any.
  *
  * @internal
  */
 export function routingQuestion(policy: string): string {
-  return `${ROUTING_RULES}\n\nRouting policy: ${policy}`
+  return policy.trim().length > 0 ? `${ROUTING_RULES}\n\nRouting policy: ${policy}` : ROUTING_RULES
 }
 
 /**
@@ -85,7 +84,7 @@ export interface ClassifierStrategyOptions {
   /**
    * Routing policy, sent verbatim and never truncated as part of the routing question every model or
    * decision model receives, after the SDK's fixed routing rules. Despite its name, it is not sent as a
-   * system prompt. Defaults to the SDK input-complexity policy.
+   * system prompt. An empty policy sends the fixed rules alone. Defaults to the SDK input-complexity policy.
    */
   readonly systemPrompt?: string
   /**
