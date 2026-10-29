@@ -28,4 +28,4 @@ npm start
 | [browser-agent](./browser-agent/)     | Browser-based agent with DOM manipulation canvas (OpenAI, Anthropic, Bedrock)                                 |
 | [telemetry](./telemetry/)             | OpenTelemetry tracing with Jaeger (requires Docker, see its [README](./telemetry/README.md))                  |
 | [decisions](./decisions/)             | Decision-model primitive — ask closed questions with typed answers and `Uncertain(reason)`                    |
-| [model-routing](./model-routing/)     | `ModelRouter` with `ClassifierStrategy` and `DecisionStrategy`, including a custom decision model and timeout |
+| [model-routing](./model-routing/)     | `ModelRouter` with `ClassifierStrategy`, routing an easy and a hard question to a fast and an advanced model  |
