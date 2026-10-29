@@ -16,7 +16,7 @@ import { DecisionModel, uncertaintyAllowed } from './decision-model.js'
 import {
   Uncertain,
   type AnswerOf,
-  type AskOptions,
+  type DecisionCallOptions,
   type DecisionInput,
   type DecisionResult,
   type Question,
@@ -93,7 +93,7 @@ export class LLMDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     const schema = buildAnswerSchema(questions)
     const tool = new StructuredOutputTool(schema)

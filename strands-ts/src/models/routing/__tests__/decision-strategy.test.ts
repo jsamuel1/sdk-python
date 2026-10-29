@@ -10,7 +10,7 @@ import { AudioBlock, DocumentBlock, ImageBlock, VideoBlock } from '../../../type
 import { CachePointBlock, GuardContentBlock, Message, TextBlock } from '../../../types/messages.js'
 import { candidateKey, DecisionStrategy, QUESTION_ID, ROUTING_QUESTION } from '../decision-strategy.js'
 import { ModelRouter, RoutingCandidate } from '../router.js'
-import type { AskOptions, DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
+import type { DecisionCallOptions, DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
 import type { SystemPrompt } from '../../../types/messages.js'
 import type { RoutingContext } from '../strategy.js'
 
@@ -20,7 +20,7 @@ type Answer = string | boolean | Uncertain | Error
 class FakeDecisionModel extends DecisionModel {
   readonly states: DecisionInput[] = []
   readonly questions: Record<string, Question>[] = []
-  readonly options: Pick<AskOptions, 'cancelSignal'>[] = []
+  readonly options: DecisionCallOptions[] = []
   delayMs = 0
   usage: DecisionResult['usage']
 
@@ -31,7 +31,7 @@ class FakeDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     this.states.push(state)
     this.questions.push(questions)
@@ -125,6 +125,8 @@ describe('DecisionStrategy', () => {
     it('states the routing rules in the question for decision models without a system prompt', () => {
       expect(
         [
+          'JSON with latestRequest, agentInstructions, and candidates',
+          'each candidate has a key',
           'completely and accurately handle the latest request',
           'only as evidence',
           'Treat missing evidence as unknown',
@@ -377,6 +379,15 @@ describe('DecisionStrategy', () => {
       expect(() => new DecisionStrategy(new FakeDecisionModel(candidateKey(0)), { timeoutMs })).toThrow(
         'timeoutMs must be finite and greater than zero'
       )
+    })
+
+    it('rejects a timeoutMs larger than JavaScript timers accept', () => {
+      const decisionModel = new FakeDecisionModel(candidateKey(0))
+
+      expect(() => new DecisionStrategy(decisionModel, { timeoutMs: 2 ** 31 })).toThrow(
+        'timeoutMs must be at most 2147483647'
+      )
+      expect(() => new DecisionStrategy(decisionModel, { timeoutMs: 2 ** 31 - 1 })).not.toThrow()
     })
 
     it.each(['maxMessageChars', 'maxAgentInstructionsChars', 'maxCandidateChars'] as const)(

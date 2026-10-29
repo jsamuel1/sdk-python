@@ -208,6 +208,7 @@ export {
 export type {
   AnswerOf,
   AskOptions,
+  DecisionCallOptions,
   DecisionInput,
   DecisionResult,
   DecisionsAPIDecisionModelOptions,

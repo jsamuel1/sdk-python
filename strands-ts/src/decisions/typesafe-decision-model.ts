@@ -4,7 +4,7 @@ import {
   resolveSystemOneProviderConfig,
   type SystemOneProviderConfig,
 } from './system-one-http-adapter.js'
-import type { AskOptions, DecisionInput, DecisionResult, Question } from './types.js'
+import type { DecisionCallOptions, DecisionInput, DecisionResult, Question } from './types.js'
 
 const TYPE_SAFE_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 const TYPE_SAFE_DEFAULT_MODEL_ID = 'jev-latest'
@@ -57,7 +57,7 @@ export class TypeSafeDecisionModel extends DecisionModel {
   protected _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     return askSystemOne(this._providerConfig, state, questions, options.cancelSignal)
   }

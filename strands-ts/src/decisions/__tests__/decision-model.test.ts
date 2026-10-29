@@ -10,7 +10,7 @@ import { LLMDecisionModel } from '../llm-decision-model.js'
 import { defineQuestions } from '../types.js'
 import type { InvocationContext } from '../../agent/invocation-context.js'
 import type { ToolContext } from '../../tools/tool.js'
-import type { AskOptions, DecisionInput, DecisionResult, Question } from '../types.js'
+import type { DecisionCallOptions, DecisionInput, DecisionResult, Question } from '../types.js'
 
 const QUESTIONS = defineQuestions({ isSafe: { question: 'Is the command safe to run?', choices: 'boolean' } })
 
@@ -19,7 +19,7 @@ const DECISION_USAGE = { inputTokens: 3, outputTokens: 2, totalTokens: 5 }
 /** Decision model whose `_ask` returns a fixed result or throws a fixed error. */
 class StubDecisionModel extends DecisionModel {
   calls = 0
-  readonly options: Pick<AskOptions, 'cancelSignal'>[] = []
+  readonly options: DecisionCallOptions[] = []
 
   constructor(private readonly _outcome: Omit<DecisionResult, 'answers'> | Error) {
     super()
@@ -28,7 +28,7 @@ class StubDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     _state: DecisionInput,
     _questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     this.calls += 1
     this.options.push(options)

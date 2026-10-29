@@ -6,7 +6,7 @@ import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 
 import { unwrapInvocationContext } from '../agent/invocation-context.js'
 import { getServiceName } from '../telemetry/utils.js'
-import type { AskOptions, DecisionInput, DecisionResult, Question } from './types.js'
+import type { AskOptions, DecisionCallOptions, DecisionInput, DecisionResult, Question } from './types.js'
 
 /**
  * Abstract base for anything that can answer closed questions.
@@ -87,7 +87,7 @@ export abstract class DecisionModel {
   protected abstract _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>>
 }
 

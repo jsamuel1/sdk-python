@@ -8,7 +8,7 @@ import {
   LLMDecisionModel,
   ModelRouter,
   RoutingCandidate,
-  type AskOptions,
+  type DecisionCallOptions,
   type DecisionInput,
   type DecisionResult,
   type Model,
@@ -36,7 +36,7 @@ class KeywordDecisionModel extends DecisionModel {
   protected async _ask<const Q extends Record<string, Question>>(
     state: DecisionInput,
     questions: Q,
-    _options: Pick<AskOptions, 'cancelSignal'>
+    _options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     this.lastState = state
     this.lastQuestions = questions
@@ -53,7 +53,7 @@ class SlowDecisionModel extends DecisionModel {
   protected _ask<const Q extends Record<string, Question>>(
     _state: DecisionInput,
     _questions: Q,
-    options: Pick<AskOptions, 'cancelSignal'>
+    options: DecisionCallOptions
   ): Promise<DecisionResult<Q>> {
     return new Promise((_resolve, reject) => {
       options.cancelSignal?.addEventListener('abort', () => {

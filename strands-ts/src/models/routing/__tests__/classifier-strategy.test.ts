@@ -15,7 +15,7 @@ import {
   ToolUseBlock,
 } from '../../../types/messages.js'
 import { ClassifierStrategy } from '../classifier-strategy.js'
-import { candidateKey, QUESTION_ID } from '../decision-strategy.js'
+import { candidateKey, QUESTION_ID, ROUTING_QUESTION } from '../decision-strategy.js'
 import { ModelRouter, RoutingCandidate } from '../router.js'
 import type { ModelStreamEvent } from '../../streaming.js'
 import type { StreamOptions } from '../../model.js'
@@ -407,26 +407,24 @@ describe('ClassifierStrategy', () => {
       )
 
       const systemPrompt = classifier.systemPrompts[0] as string
-      const routingRulesBlocks = systemPrompt.split('ROUTING RULES').length - 1
+      const schema = classifier.options[0]?.toolSpecs?.[0]?.inputSchema as {
+        properties?: Record<string, { description?: string }>
+      }
       const candidates = routingState(classifier).candidates as { description?: string }[]
       expect({
         startsWithPolicy: systemPrompt.startsWith(policy),
         maliciousInstructionInSystemPrompt: systemPrompt.includes(maliciousInstruction),
         delimiterInjectionInSystemPrompt: systemPrompt.includes(delimiterInjection),
-        routingRulesBlocks,
+        routingQuestion: schema.properties?.[QUESTION_ID]?.description,
         injectedDescription: candidates[1]?.description,
-        declarationOrderRule: systemPrompt.includes(
-          'MUST NOT infer capability, quality, cost, or preference from declaration order'
-        ),
         mandatoryRules: systemPrompt.includes('MANDATORY RULES'),
         request: receivedRequestText(classifier),
       }).toEqual({
         startsWithPolicy: true,
         maliciousInstructionInSystemPrompt: false,
         delimiterInjectionInSystemPrompt: false,
-        routingRulesBlocks: 1,
+        routingQuestion: ROUTING_QUESTION,
         injectedDescription: delimiterInjection,
-        declarationOrderRule: true,
         mandatoryRules: true,
         request: maliciousInstruction,
       })
@@ -451,12 +449,12 @@ describe('ClassifierStrategy', () => {
       {
         name: 'unknown key',
         build: (): ClassifierModel => selectionModel(2),
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'uncertain answer',
         build: (): ClassifierModel => rawAnswerModel('uncertain'),
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'legacy index answer',
@@ -467,7 +465,7 @@ describe('ClassifierStrategy', () => {
             toolUseId: 'classification',
             input: { selectedCandidateIndex: 1 },
           }) as ClassifierModel,
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'wrong tool name',
@@ -478,7 +476,7 @@ describe('ClassifierStrategy', () => {
             toolUseId: 'classification',
             input: { [QUESTION_ID]: { answer: candidateKey(0) } },
           }) as ClassifierModel,
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'invalid structured input',
@@ -489,18 +487,18 @@ describe('ClassifierStrategy', () => {
             toolUseId: 'classification',
             input: {},
           }) as ClassifierModel,
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'plain-text response',
         build: (): ClassifierModel =>
           new ClassifierModel().addTurn({ type: 'textBlock', text: candidateKey(0) }) as ClassifierModel,
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'provider error',
         build: (): ClassifierModel => new ClassifierModel().addTurn(new Error('provider-secret')) as ClassifierModel,
-        reason: 'classifier_error',
+        reason: 'decision_error',
       },
       {
         name: 'timeout',
@@ -509,12 +507,12 @@ describe('ClassifierStrategy', () => {
           classifier.delayMs = 50
           return classifier
         },
-        reason: 'classifier_timeout',
+        reason: 'decision_timeout',
       },
     ])('warns safely and declines on a $name', async ({ build, reason }) => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
       const classifier = build()
-      const timeoutMs = reason === 'classifier_timeout' ? 5 : 30_000
+      const timeoutMs = reason === 'decision_timeout' ? 5 : 30_000
       const strategy = new ClassifierStrategy(classifier, { timeoutMs })
       const router = new ModelRouter([candidate('first'), candidate('second')], { strategy })
 
@@ -523,7 +521,7 @@ describe('ClassifierStrategy', () => {
       const logged = warn.mock.calls.map((call) => String(call[0])).join('\n')
       expect(selected).toBeUndefined()
       expect(logged).toContain(`strategy=<ClassifierStrategy>, reason=<${reason}>`)
-      expect(logged).toContain('classification declined')
+      expect(logged).toContain('selection declined')
       expect(logged).not.toContain('provider-secret')
     })
 
