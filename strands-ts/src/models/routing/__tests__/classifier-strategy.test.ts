@@ -59,7 +59,6 @@ class ConfigGuardModel extends MockMessageModel {
   }
 }
 
-/** A classifier that selects the candidate at `index`. */
 function selectionModel(index: number): ClassifierModel {
   return rawAnswerModel(candidateKey(index))
 }
@@ -114,10 +113,6 @@ interface RoutingState {
 function routingState(classifier: ClassifierModel): RoutingState {
   const block = classifier.requests[0]![0]!.content[0]!
   return JSON.parse((block as TextBlock).text) as RoutingState
-}
-
-function receivedRequestText(classifier: ClassifierModel): string {
-  return routingState(classifier).latestRequest
 }
 
 afterEach(() => {
@@ -254,7 +249,7 @@ describe('ClassifierStrategy', () => {
 
       await strategy.select(routingContext(router, { messages }))
 
-      expect(receivedRequestText(classifier)).toBe(originalRequest)
+      expect(routingState(classifier).latestRequest).toBe(originalRequest)
       const serializedRequests = JSON.stringify(classifier.requests)
       expect(['payload', 'approved-secret'].some((secret) => serializedRequests.includes(secret))).toBe(false)
     })
@@ -278,7 +273,7 @@ describe('ClassifierStrategy', () => {
 
       await strategy.select(routingContext(router, { messages }))
 
-      expect(receivedRequestText(classifier)).toBe(expected)
+      expect(routingState(classifier).latestRequest).toBe(expected)
     })
 
     it.each([
@@ -301,7 +296,7 @@ describe('ClassifierStrategy', () => {
 
       await strategy.select(routingContext(router, { messages }))
 
-      expect(receivedRequestText(classifier)).toBe(NO_REQUEST_TEXT)
+      expect(routingState(classifier).latestRequest).toBe(NO_REQUEST_TEXT)
     })
 
     it('bounds the request and excludes opaque payloads', async () => {
@@ -325,7 +320,7 @@ describe('ClassifierStrategy', () => {
       ]
 
       await strategy.select(routingContext(router, { messages }))
-      const request = receivedRequestText(classifier)
+      const request = routingState(classifier).latestRequest
 
       expect({
         length: request.length,
@@ -343,7 +338,7 @@ describe('ClassifierStrategy', () => {
 
       await strategy.select(routingContext(router, { messages: [] }))
 
-      expect(receivedRequestText(classifier)).toBe(NO_REQUEST_TEXT.slice(0, 1))
+      expect(routingState(classifier).latestRequest).toBe(NO_REQUEST_TEXT.slice(0, 1))
     })
   })
 
@@ -418,7 +413,7 @@ describe('ClassifierStrategy', () => {
         routingQuestion: schema.properties?.[QUESTION_ID]?.description,
         injectedDescription: candidates[1]?.description,
         mandatoryRules: systemPrompt.includes('MANDATORY RULES'),
-        request: receivedRequestText(classifier),
+        request: routingState(classifier).latestRequest,
       }).toEqual({
         startsWithPolicy: true,
         maliciousInstructionInSystemPrompt: false,

@@ -46,24 +46,6 @@ class KeywordDecisionModel extends DecisionModel {
   }
 }
 
-/** Never answers on its own; records whether the strategy's timeout aborted it. */
-class SlowDecisionModel extends DecisionModel {
-  aborted = false
-
-  protected _ask<const Q extends Record<string, Question>>(
-    _state: DecisionInput,
-    _questions: Q,
-    options: DecisionCallOptions
-  ): Promise<DecisionResult<Q>> {
-    return new Promise((_resolve, reject) => {
-      options.cancelSignal?.addEventListener('abort', () => {
-        this.aborted = true
-        reject(new Error('decision aborted'))
-      })
-    })
-  }
-}
-
 function candidates(routine: Model, advanced: Model): RoutingCandidate[] {
   return [
     new RoutingCandidate({
@@ -126,15 +108,6 @@ async function main(): Promise<void> {
   results.push(report('advanced request', await servedBy(keyword, ADVANCED_REQUEST), ADVANCED_MODEL_ID))
   console.log('      question sent:', JSON.stringify(keywordModel.lastQuestions))
   console.log('      state sent:   ', String(keywordModel.lastState).slice(0, 300), '...')
-
-  console.log('\n=== 4. Timeout aborts the decision call and serves candidate c0 ===')
-  const slowModel = new SlowDecisionModel()
-  const slow = new ModelRouter(candidates(routine, advanced), {
-    strategy: new DecisionStrategy(slowModel, { timeoutMs: 200 }),
-  })
-  results.push(report('advanced request after timeout', await servedBy(slow, ADVANCED_REQUEST), ROUTINE_MODEL_ID))
-  console.log(`      decision call aborted: ${slowModel.aborted}`)
-  results.push(slowModel.aborted)
 
   const failed = results.filter((ok) => !ok).length
   console.log(`\n${results.length - failed}/${results.length} checks passed`)

@@ -294,7 +294,6 @@ const REQUEST_BLOCK_PROJECTIONS: { readonly [T in ContentBlock['type']]: BlockPr
   citationsBlock: notRequestBearing,
 }
 
-/** Project one block through its type's entry in {@link REQUEST_BLOCK_PROJECTIONS}. */
 function projectRequestBlock(block: ContentBlock): string | undefined {
   const project = REQUEST_BLOCK_PROJECTIONS[block.type] as (block: ContentBlock) => string | undefined
   return project(block)
